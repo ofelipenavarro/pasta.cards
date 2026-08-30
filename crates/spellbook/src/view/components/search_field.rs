@@ -1,14 +1,14 @@
 //! Search input with a clear ("x") button and change notification.
 //!
-//! Port of `desktop/ui/js/ui/search-field.js`. Wraps a `LabeledField`
+//! Port of `desktop/ui/js/ui/search-field.js`. Wraps a [`LabeledField`]
 //! and adds a clear button that appears when there's text.
 
 use engine::compositor::Compositor;
 use engine::theme::Theme;
-use engine::ui::widgets::{EventResult, Rect, WidgetEvent};
+use engine::ui::widgets::Rect;
 
-use super::{EditKey, LabeledField, ScreenCtx};
-use crate::art::ArtCache;
+use super::{EditKey, LabeledField};
+use super::super::text;
 
 /// Search field with clear button. Emits `on_changed` callback when
 /// the text changes (debounced externally by the screen if needed).
@@ -67,6 +67,28 @@ impl SearchField {
         self.field.is_focused()
     }
 
+    pub fn set_focused(&mut self, focused: bool) {
+        self.field.set_focused(focused);
+    }
+
+    pub fn render(&self, c: &mut Compositor, block: Rect, theme: &Theme) {
+        self.field.render(c, block, theme);
+        if self.clear_visible {
+            let glyph = "×";
+            let size = 14.0;
+            let field = self.field.field_rect(block);
+            text(
+                c,
+                glyph,
+                size,
+                600,
+                field.x + field.w - 24.0,
+                field.y + (field.h - size * 1.4) / 2.0,
+                theme.colors.text_dim.0,
+            );
+        }
+    }
+
     fn update_clear_visibility(&mut self) {
         self.clear_visible = !self.field.is_empty();
     }
@@ -81,18 +103,15 @@ impl SearchField {
         consumed
     }
 
-    pub fn handle_edit_key(&mut self, key: super::EditKey) -> bool {
-        if key == super::EditKey::Escape && !self.field.is_empty() {
-            // Escape clears the field
-            self.field.set_value("");
+    pub fn handle_edit_key(&mut self, key: EditKey) -> bool {
+        let (consumed, changed) = self.field.handle_edit_key(key);
+        if changed {
             self.update_clear_visibility();
             if let Some(cb) = &self.on_changed {
-                cb("");
+                cb(self.field.value());
             }
-            true
-        } else {
-            self.field.handle_edit_key(key)
         }
+        consumed
     }
 
     pub fn handle_click(&mut self, local_x: f32, field_rect: Rect) {
@@ -105,32 +124,12 @@ impl SearchField {
                 cb("");
             }
         } else {
-            self.field.handle_click(local_x);
+            self.field.click(local_x);
         }
     }
 
     pub fn tick(&mut self, dt: f32) -> bool {
         self.field.tick(dt)
-    }
-
-    pub fn set_focused(&mut self, focused: bool) {
-        self.field.set_focused(focused);
-    }
-
-    pub fn is_focused(&self) -> bool {
-        self.field.is_focused()
-    }
-}
-
-impl SearchField {
-    /// Dummy ScreenCtx for internal event handling
-    fn dummy() -> ScreenCtx<'static> {
-        use std::sync::mpsc;
-        let (tx, _rx) = mpsc::channel();
-        ScreenCtx {
-            tx: &tx,
-            actions: &mut Vec::new(),
-        }
     }
 }
 
@@ -140,7 +139,7 @@ mod tests {
 
     #[test]
     fn search_field_clears() {
-        let theme = crate::engine::theme::Theme::hoff();
+        let theme = Theme::hoff();
         let mut field = SearchField::new_without_callback("Buscar...", &theme);
         field.set_value("test");
         assert_eq!(field.value(), "test");

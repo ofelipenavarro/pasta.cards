@@ -74,6 +74,26 @@ impl LabeledField {
         self.input.buffer.is_empty()
     }
 
+    pub fn focus(&mut self) {
+        self.input.focus();
+    }
+
+    pub fn unfocus(&mut self) {
+        self.input.unfocus();
+    }
+
+    pub fn set_focused(&mut self, focused: bool) {
+        if focused {
+            self.input.focus();
+        } else {
+            self.input.unfocus();
+        }
+    }
+
+    pub fn is_focused(&self) -> bool {
+        self.input.focused
+    }
+
     pub fn click(&mut self, local_x: f32) {
         self.input.focus();
         self.input.handle_click(local_x - TEXT_PAD);

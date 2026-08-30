@@ -5,6 +5,8 @@ description = "Spellbook — MTG collection & deck manager"
 edition = "2021"
 rust-version = "1.77"
 
+[workspace]
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 

@@ -200,18 +200,19 @@ impl Modal {
         self.open
     }
 
-    pub fn handle_overlay_event(&mut self, event: &WidgetEvent, vw: f32, vh: f32) -> bool {
+    /// Handles an overlay event. Returns `(consumed, action)`.
+    pub fn handle_overlay_event(&mut self, event: &WidgetEvent, vw: f32, vh: f32) -> (bool, engine::ui::widgets::ModalAction) {
         if !self.open {
-            return false;
+            return (false, engine::ui::widgets::ModalAction::None);
         }
         let (action, result) = self.engine_modal.handle_event(event, vw, vh);
         match action {
             engine::ui::widgets::ModalAction::Confirm
             | engine::ui::widgets::ModalAction::Cancel => {
                 self.open = false;
-                true
+                (true, action)
             }
-            engine::ui::widgets::ModalAction::None => result.handled,
+            engine::ui::widgets::ModalAction::None => (result.handled, action),
         }
     }
 
@@ -233,11 +234,11 @@ impl ConfirmDialog {
     pub fn new(
         title: impl Into<String>,
         message: impl Into<String>,
-        _confirm_label: impl Into<String>,
-        _cancel_label: impl Into<String>,
+        confirm_label: impl Into<String>,
+        cancel_label: impl Into<String>,
         danger: bool,
     ) -> Self {
-        let modal = Modal::new(title, message, "Confirmar", "Cancelar")
+        let modal = Modal::new(title, message, confirm_label, cancel_label)
             .intent(if danger { Intent::Destructive } else { Intent::Constructive });
         Self {
             modal,
@@ -266,9 +267,9 @@ impl ConfirmDialog {
         if !self.modal.is_open() {
             return false;
         }
-        let consumed = self.modal.handle_overlay_event(event, vw, vh);
+        let (consumed, action) = self.modal.handle_overlay_event(event, vw, vh);
         if !self.modal.is_open() && self.result.is_none() {
-            self.result = Some(false);
+            self.result = Some(matches!(action, engine::ui::widgets::ModalAction::Confirm));
         }
         consumed
     }

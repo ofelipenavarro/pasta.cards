@@ -68,6 +68,7 @@ impl WishlistScreen {
     pub fn handle_overlay_event(
         &mut self,
         _event: &WidgetEvent,
+        _window: Rect,
         _ctx: &mut ScreenCtx,
     ) -> EventResult {
         EventResult::IGNORED

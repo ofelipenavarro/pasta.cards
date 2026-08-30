@@ -234,11 +234,13 @@ struct Layers {
 
 impl SpellbookView {
     pub fn new(width: f32, height: f32, tx: Sender<Command>) -> Self {
+        let theme = Theme::hoff();
+        let collection = collection::CollectionScreen::new(&theme);
         Self {
             width,
             height,
             scale_factor: 1.0,
-            theme: Theme::hoff(),
+            theme,
             route: Route::Home,
             tx,
             art: ArtCache::new(),
@@ -251,7 +253,7 @@ impl SpellbookView {
             layers: None,
             home: home::HomeScreen::new(),
             decks: decks::DecksScreen::new(),
-            collection: collection::CollectionScreen::new(),
+            collection,
             wishlist: wishlist::WishlistScreen::new(),
             scanner: scanner::ScannerScreen::new(),
             games: games::GamesScreen::new(),
@@ -422,17 +424,18 @@ impl SpellbookView {
         // An open overlay owns the whole window: events go to the screen
         // first, and the sidebar only sees what the overlay let through.
         if self.overlay_open() {
+            let window_rect = Rect::new(0.0, 0.0, self.width, self.height);
             let mut ctx = ScreenCtx {
                 tx: &self.tx,
                 actions: &mut self.actions,
             };
             let overlay_result = match self.route {
-                Route::Home => self.home.handle_overlay_event(event, &mut ctx),
-                Route::Decks | Route::Deck(_) => self.decks.handle_overlay_event(event, &mut ctx),
-                Route::Collection => self.collection.handle_overlay_event(event, &mut ctx),
-                Route::Wishlist => self.wishlist.handle_overlay_event(event, &mut ctx),
-                Route::Scanner => self.scanner.handle_overlay_event(event, &mut ctx),
-                Route::Games => self.games.handle_overlay_event(event, &mut ctx),
+                Route::Home => self.home.handle_overlay_event(event, window_rect, &mut ctx),
+                Route::Decks | Route::Deck(_) => self.decks.handle_overlay_event(event, window_rect, &mut ctx),
+                Route::Collection => self.collection.handle_overlay_event(event, window_rect, &mut ctx),
+                Route::Wishlist => self.wishlist.handle_overlay_event(event, window_rect, &mut ctx),
+                Route::Scanner => self.scanner.handle_overlay_event(event, window_rect, &mut ctx),
+                Route::Games => self.games.handle_overlay_event(event, window_rect, &mut ctx),
             };
             self.drain_actions();
             result = result.merge(overlay_result);
