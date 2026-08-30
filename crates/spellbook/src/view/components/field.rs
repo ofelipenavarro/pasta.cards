@@ -3,10 +3,10 @@
 //! Provides label above, field below, focus ring when focused, and
 //! integrates with the shell's keyboard routing (EditKey, handle_text).
 
-use engine::compositor::{Compositor, Rect};
+use engine::compositor::Compositor;
 use engine::text_input::TextInput;
 use engine::theme::Theme;
-use engine::ui::widgets::{EventResult, WidgetEvent, focus_ring};
+use engine::ui::widgets::{EventResult, Rect, WidgetEvent, focus_ring, text};
 
 use super::{EditKey, ScreenCtx};
 use crate::art::ArtCache;
@@ -122,7 +122,7 @@ impl LabeledField {
     /// Handle mouse click on the field. `local_x` is relative to field left edge.
     pub fn handle_click(&mut self, local_x: f32) {
         self.focus();
-        self.input.handle_click(local_x - TEXT_PAD);
+        self.input.handle_click(local_x - TEXT_PAD); // TEXT_PAD = 8.0
     }
 
     /// Advance cursor blink. Returns true while focused (needs frames).
@@ -184,7 +184,7 @@ impl LabeledField {
         _art: &mut ArtCache,
     ) {
         // Label
-        engine::ui::widgets::text(
+        text(
             c,
             &self.label,
             12.0,
@@ -212,7 +212,7 @@ impl LabeledField {
 
         // Focus ring
         if self.focused {
-            c.push(engine::ui::widgets::focus_ring(
+            c.push(focus_ring(
                 field_rect,
                 theme.radius.sm,
                 theme,
@@ -261,7 +261,7 @@ impl LabeledField {
 
     pub fn handle_click(&mut self, local_x: f32) {
         self.focus();
-        self.input.handle_click(local_x - TEXT_PAD);
+        self.input.handle_click(local_x - TEXT_PAD); // TEXT_PAD = 8.0
     }
 }
 

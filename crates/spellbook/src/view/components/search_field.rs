@@ -3,9 +3,9 @@
 //! Port of `desktop/ui/js/ui/search-field.js`. Wraps a `LabeledField`
 //! and adds a clear button that appears when there's text.
 
-use engine::compositor::{Compositor, Rect};
+use engine::compositor::Compositor;
 use engine::theme::Theme;
-use engine::ui::widgets::{EventResult, WidgetEvent};
+use engine::ui::widgets::{EventResult, Rect, WidgetEvent};
 
 use super::{EditKey, LabeledField, ScreenCtx};
 use crate::art::ArtCache;
@@ -106,117 +106,6 @@ impl SearchField {
             }
         } else {
             self.field.handle_click(local_x);
-        }
-    }
-
-    pub fn tick(&mut self, dt: f32) -> bool {
-        self.field.tick(dt)
-    }
-
-    pub fn set_focused(&mut self, focused: bool) {
-        self.field.set_focused(focused);
-    }
-
-    pub fn is_focused(&self) -> bool {
-        self.field.is_focused()
-    }
-
-    pub fn render(
-        &mut self,
-        c: &mut Compositor,
-        rect: Rect,
-        theme: &Theme,
-        _art: &mut ArtCache,
-    ) {
-        // We don't render a label, just the field with clear button
-        let field_rect = Rect::new(rect.x, rect.y, rect.w, 36.0);
-
-        // Field background
-        c.push(engine::ui::widgets::rounded_rect(
-            field_rect.x,
-            field_rect.y,
-            field_rect.w,
-            field_rect.h,
-            theme.radius.sm,
-            self.field.input.bg_color,
-        ));
-
-        // Focus ring
-        if self.field.focused {
-            c.push(engine::ui::widgets::focus_ring(
-                field_rect,
-                theme.radius.sm,
-                theme,
-            ));
-        }
-
-        // Text input scene
-        for node in self.field.input.build_scene(field_rect.x, field_rect.y, field_rect.w) {
-            c.push(node);
-        }
-
-        // Clear button (x)
-        if self.clear_visible {
-            let btn_size = 24.0;
-            let btn_x = field_rect.x + field_rect.w - 28.0;
-            let btn_y = field_rect.y + 6.0;
-            let btn_rect = Rect::new(btn_x, btn_y, btn_size, btn_size);
-
-            // Button background
-            c.push(engine::ui::widgets::rounded_rect(
-                btn_rect.x,
-                btn_rect.y,
-                btn_rect.w,
-                btn_rect.h,
-                theme.radius.sm,
-                theme.glass.surface_active.0,
-            ));
-
-            // X icon
-            if let Some(node) = engine::ui::icons::icon_at(
-                "x",
-                14.0,
-                theme.colors.text_dim.0,
-                btn_rect.x + 5.0,
-                btn_rect.y + 5.0,
-            ) {
-                c.push(node);
-            }
-        }
-
-        // Also render the inner text input scene
-        for node in self.field.input.build_scene(rect.x, rect.y, rect.w) {
-            c.push(node);
-        }
-    }
-
-    pub fn handle_event(
-        &mut self,
-        event: &WidgetEvent,
-        rect: Rect,
-        _ctx: &mut super::ScreenCtx,
-    ) -> bool {
-        let field_rect = Rect::new(rect.x, rect.y, rect.w, 36.0);
-
-        match event {
-            WidgetEvent::MouseDown { x, y } => {
-                if self.clear_visible {
-                    let btn_x = rect.x + rect.w - 28.0;
-                    let btn_y = rect.y + 6.0;
-                    if Rect::new(rect.x + rect.w - 28.0, rect.y + 6.0, 24.0, 24.0).contains(x, y) {
-                        // Clear button clicked
-                        self.field.set_value("");
-                        self.clear_visible = false;
-                        if let Some(cb) = &self.on_changed {
-                            cb("");
-                        }
-                        return true;
-                    }
-                }
-                // Delegate to field
-                self.field.handle_event(event, rect, &mut super::ScreenCtx::dummy())
-            }
-            _ => self.field.handle_event(event, rect, &mut super::ScreenCtx::dummy()),
         }
     }
 
