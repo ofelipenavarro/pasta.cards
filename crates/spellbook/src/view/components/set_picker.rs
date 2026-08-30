@@ -1,376 +1,291 @@
 //! Set/printing picker dropdown with search.
 //!
 //! Port of `desktop/ui/js/ui/set-picker.js`. An autocomplete field that
-//! searches sets via the worker thread (API), scoped optionally to a
-//! specific card's printings. Selected set populates a hidden code field.
+//! searches sets via the worker thread, scoped optionally to a specific
+//! card's printings. Selected set populates a hidden code field exposed
+//! through [`SetPicker::code`].
 
-use engine::compositor::{Compositor, Rect, SceneNode};
-use engine::text::{TextMeasurer, TextStyle, TypographyScale};
-use engine::theme::Theme;
-use engine::ui::icons;
-use engine::ui::widgets::{EventResult, Rect, WidgetEvent, rounded_rect, focus_ring, glass_pill};
+use engine::compositor::{Compositor, LayerId, SceneNode, TextNodeKey};
+use engine::theme::{Theme, TypographyScale};
+use engine::ui::widgets::{EventResult, Rect, WidgetEvent, glass_pill, menu_shadow, rounded_rect};
 
-use super::{EditKey, LabeledField, ScreenCtx};
-use crate::art::ArtCache;
-use crate::spellbook_core::client::{Command, Event};
-use crate::spellbook_core::ops::cards::SetInfo;
+use spellbook_core::client::Command;
+use spellbook_core::ops::cards::SetInfo;
 
-/// An option in the set picker dropdown.
-#[derive(Clone, Debug)]
-struct SetOption {
-    name: String,
-    code: String,
-    released_at: Option<String>,
-}
+use super::field::LabeledField;
+use super::{EditKey, ScreenCtx};
 
-/// The set picker component: a search field + dynamic dropdown.
-/// The hidden `code` field is updated when a set is selected.
+const ROW_H: f32 = 34.0;
+const MAX_ROWS: usize = 6;
+const GAP: f32 = 4.0;
+
+/// Set/printing picker: a labeled search field with a dynamic dropdown.
 pub struct SetPicker {
-    search: LabeledField,
-    options: Vec<SetOption>,
-    open: bool,
-    hovered_idx: Option<usize>,
-    focused: bool,
-    hidden_code: Option<String>,
+    pub field: LabeledField,
     card_name: Option<String>,
-    on_changed: Option<Box<dyn Fn(&str) + Send + Sync>>,
-    last_query: String,
-    request_pending: bool,
+    options: Vec<SetInfo>,
+    open: bool,
+    hovered: Option<usize>,
+    selected_code: Option<String>,
+    in_flight: bool,
+    since_edit: f32,
+    last_sent_query: Option<String>,
 }
 
 impl SetPicker {
-    pub fn new(
-        placeholder: impl Into<String>,
-        theme: &Theme,
-        on_changed: impl Fn(&str) + Send + Sync + 'static,
-    ) -> Self {
-        let search = LabeledField::new("", placeholder, theme);
+    pub fn new(label: impl Into<String>, theme: &Theme, card_name: Option<String>) -> Self {
         Self {
-            search,
+            field: LabeledField::new(label, "Nome ou código da edição…", theme),
+            card_name,
             options: Vec::new(),
             open: false,
-            hovered_idx: None,
-            focused: false,
-            hidden_code: None,
-            card_name: None,
-            on_changed: Some(Box::new(on_changed)),
-            last_query: String::new(),
-            request_pending: false,
+            hovered: None,
+            selected_code: None,
+            in_flight: false,
+            since_edit: 0.0,
+            last_sent_query: None,
         }
     }
 
-    pub fn new_without_callback(placeholder: impl Into<String>, theme: &Theme) -> Self {
-        let search = LabeledField::new("", placeholder, theme);
-        Self {
-            search,
-            options: Vec::new(),
-            open: false,
-            hovered_idx: None,
-            focused: false,
-            hidden_code: None,
-            card_name: None,
-            on_changed: None,
-            last_query: String::new(),
-            request_pending: false,
-        }
-    }
-
-    /// Set the card name to scope the set search to that card's printings.
-    pub fn set_card_name(&mut self, card_name: Option<String>) {
+    pub fn set_card(&mut self, card_name: Option<String>) {
         self.card_name = card_name;
+        self.options.clear();
+        self.open = false;
+        self.hovered = None;
+        self.selected_code = None;
     }
 
-    /// Get the selected set code (from the hidden field).
-    pub fn get_code(&self) -> Option<String> {
-        self.hidden_code.clone()
+    pub fn code(&self) -> Option<String> {
+        self.selected_code.clone()
     }
 
-    /// Check if the dropdown is open.
     pub fn is_open(&self) -> bool {
         self.open
     }
 
-    /// Focus/unfocus the search field.
-    pub fn set_focused(&mut self, focused: bool) {
-        self.focused = focused;
-        self.search.set_focused(focused);
+    pub fn field_rect(&self, block: Rect) -> Rect {
+        self.field.field_rect(block)
     }
 
-    pub fn is_focused(&self) -> bool {
-        self.focused
+    /// Receive search results from the worker. Returns whether the scene changed.
+    pub fn on_suggestions(&mut self, sets: &Vec<SetInfo>) -> bool {
+        self.in_flight = false;
+        self.last_sent_query = Some(self.field.value().trim().to_string());
+        self.options = sets.clone();
+        self.hovered = None;
+        self.open = !self.options.is_empty();
+        true
     }
 
-    /// Called when the search text changes - triggers a debounced search.
-    fn on_search_changed(&mut self, query: &str) {
-        self.last_query = query.to_string();
-        // The actual API call is triggered by the screen via handle_data
-        // when it receives the SearchSets result.
+    /// Build the `Command::SearchSets` for the current query.
+    pub fn search_command(&self, limit: i64) -> Command {
+        Command::SearchSets {
+            q: self.field.value().trim().to_string(),
+            card: self.card_name.clone(),
+            limit,
+        }
     }
 
-    /// Called by the screen when search results arrive.
-    pub fn set_options(&mut self, options: Vec<SetInfo>) {
-        self.options = options
-            .into_iter()
-            .map(|s| SetOption {
-                name: s.name,
-                code: s.code,
-                released_at: s.released_at.map(|d| d.split('-').next().unwrap_or("").to_string()),
-            })
-            .collect();
-        self.hovered_idx = None;
-        self.open = true;
-    }
-
-    /// Get the currently hovered/selected option code.
-    pub fn hovered_code(&self) -> Option<String> {
-        self.hovered_idx.and_then(|i| self.options.get(i)).map(|o| o.code.clone())
-    }
-
-    /// Take the selected code (called when user confirms selection).
-    pub fn take_selected_code(&mut self) -> Option<String> {
-        if let Some(i) = self.hovered_idx {
-            let code = self.options[i].code.clone();
-            self.hidden_code = Some(code.clone());
-            self.open = false;
-            self.hovered_idx = None;
-            Some(code)
+    pub fn set_focused(&mut self, focused: bool, _ctx: &mut ScreenCtx) {
+        if focused {
+            if !self.field.input.focused {
+                self.field.input.focus();
+                self.since_edit = 0.0;
+            }
         } else {
-            None
-        }
-    }
-
-    // Keyboard handling
-    pub fn handle_text(&mut self, s: &str) -> bool {
-        let consumed = self.search.handle_text(s);
-        if let Some(cb) = &self.on_changed {
-            cb(self.search.value());
-        }
-        consumed
-    }
-
-    pub fn handle_edit_key(&mut self, key: super::EditKey) -> bool {
-        match key {
-            super::EditKey::Enter => {
-                if let Some(code) = self.take_selected_code() {
-                    if let Some(cb) = &self.on_changed {
-                        cb(&code);
-                    }
-                    true
-                } else {
-                    false
-                }
-            }
-            super::EditKey::Escape => {
-                if self.open {
-                    self.open = false;
-                    self.hovered_idx = None;
-                    true
-                } else {
-                    self.search.unfocus();
-                    false
-                }
-            }
-            super::EditKey::ArrowDown => {
-                if self.open && !self.options.is_empty() {
-                    let next = match self.hovered_idx {
-                        Some(i) => (i + 1).min(self.options.len() - 1),
-                        None => 0,
-                    };
-                    self.hovered_idx = Some(next);
-                    true
-                } else {
-                    false
-                }
-            }
-            super::EditKey::ArrowUp => {
-                if self.open && !self.options.is_empty() {
-                    let next = match self.hovered_idx {
-                        Some(i) => i.saturating_sub(1),
-                        None => self.options.len().saturating_sub(1),
-                    };
-                    self.hovered_idx = Some(next);
-                    true
-                } else {
-                    false
-                }
-            }
-            _ => self.search.handle_edit_key(key),
-        }
-    }
-
-    pub fn handle_click(&mut self, local_x: f32, field_rect: Rect) {
-        // Delegate click to the search field (handles focus)
-        self.search.handle_click(local_x);
-    }
-
-    pub fn handle_event(
-        &mut self,
-        event: &WidgetEvent,
-        rect: Rect,
-        _ctx: &mut super::ScreenCtx,
-    ) -> bool {
-        // Delegate to search field for focus/click handling
-        self.search.handle_event(event, rect, &mut super::ScreenCtx::dummy())
-    }
-
-    /// Called when search results arrive from the worker thread.
-    pub fn on_search_results(&mut self, results: Vec<SetInfo>) {
-        self.request_pending = false;
-        self.set_options(results);
-    }
-
-    /// Trigger a search for the current query.
-    pub fn trigger_search(&mut self, ctx: &mut ScreenCtx) {
-        if self.last_query.is_empty() {
-            self.options.clear();
+            self.field.input.unfocus();
             self.open = false;
+            self.hovered = None;
+        }
+    }
+
+    pub fn handle_text(&mut self, s: &str) -> EventResult {
+        if !self.field.input.focused {
+            return EventResult::IGNORED;
+        }
+        self.field.handle_text(s);
+        self.open = false;
+        self.hovered = None;
+        self.selected_code = None;
+        self.since_edit = 0.0;
+        EventResult::changed()
+    }
+
+    pub fn handle_edit_key(&mut self, key: EditKey) -> (bool, bool) {
+        if !self.field.input.focused && !self.open {
+            return (false, false);
+        }
+        match key {
+            EditKey::Enter => {
+                if self.open {
+                    if let Some(i) = self.hovered {
+                        self.pick(i);
+                        return (true, true);
+                    }
+                }
+                (false, false)
+            }
+            EditKey::Tab => (false, false),
+            _ => {
+                if self.open {
+                    match key {
+                        EditKey::Left | EditKey::Right | EditKey::Home | EditKey::End => {
+                            let changed = self.field.handle_edit_key(key).1;
+                            return (true, changed);
+                        }
+                        EditKey::Up => {
+                            if !self.options.is_empty() {
+                                let i = self.hovered.map_or(0, |i| i.saturating_sub(1));
+                                self.hovered = Some(i);
+                                return (true, true);
+                            }
+                            (true, false)
+                        }
+                        EditKey::Down => {
+                            if !self.options.is_empty() {
+                                let last = self.options.len() - 1;
+                                let i = self.hovered.map_or(0, |i| (i + 1).min(last));
+                                self.hovered = Some(i);
+                                return (true, true);
+                            }
+                            (true, false)
+                        }
+                        _ => (false, false),
+                    }
+                } else {
+                    let changed = self.field.handle_edit_key(key).1;
+                    (true, changed)
+                }
+            }
+        }
+    }
+
+    pub fn handle_escape(&mut self) -> bool {
+        if self.open {
+            self.open = false;
+            self.hovered = None;
+            true
+        } else {
+            false
+        }
+    }
+
+    fn pick(&mut self, i: usize) {
+        if let Some(set) = self.options.get(i) {
+            self.selected_code = Some(set.code.clone());
+            self.field.set_value(set.name.as_deref().unwrap_or(&set.code));
+            self.open = false;
+            self.hovered = None;
+        }
+    }
+
+    fn dropdown_rect(&self, block: Rect) -> Rect {
+        let field = self.field_rect(block);
+        let rows = self.options.len().min(MAX_ROWS) as f32;
+        let h = rows * ROW_H + (rows.max(1.0) + 1.0) * GAP;
+        Rect::new(field.x, field.y + field.h + 4.0, field.w, h)
+    }
+
+    pub fn handle_event(&mut self, event: &WidgetEvent, block: Rect) -> EventResult {
+        let field = self.field_rect(block);
+        match *event {
+            WidgetEvent::MouseMove { x, y } => {
+                if self.open {
+                    let dd = self.dropdown_rect(block);
+                    if dd.contains(x, y) {
+                        let i = ((y - dd.y - GAP) / (ROW_H + GAP)).floor() as usize;
+                        if i < self.options.len() {
+                            if self.hovered != Some(i) {
+                                self.hovered = Some(i);
+                                return EventResult::changed();
+                            }
+                        }
+                    }
+                }
+                EventResult::IGNORED
+            }
+            WidgetEvent::MouseDown { x, y } => {
+                if self.open {
+                    let dd = self.dropdown_rect(block);
+                    if dd.contains(x, y) {
+                        let i = ((y - dd.y - GAP) / (ROW_H + GAP)).floor() as usize;
+                        if i < self.options.len() {
+                            self.pick(i);
+                            return EventResult::clicked();
+                        }
+                    }
+                }
+                if field.contains(x, y) {
+                    self.field.click(x - field.x);
+                    EventResult::changed()
+                } else {
+                    EventResult::IGNORED
+                }
+            }
+            _ => EventResult::IGNORED,
+        }
+    }
+
+    pub fn tick(&mut self, dt: f32, ctx: &mut ScreenCtx) -> bool {
+        self.field.tick(dt);
+        self.since_edit += dt;
+        let q = self.field.value().trim().to_string();
+        if !self.in_flight
+            && self.field.input.focused
+            && !q.is_empty()
+            && self.since_edit >= 0.15
+            && self.last_sent_query.as_deref() != Some(&q)
+        {
+            self.in_flight = true;
+            ctx.send(self.search_command(20));
+        }
+        self.field.input.focused || self.in_flight
+    }
+
+    pub fn render(&self, c: &mut Compositor, block: Rect, theme: &Theme) {
+        self.field.render(c, block, theme);
+    }
+
+    pub fn render_overlay(&self, c: &mut Compositor, _layer: LayerId, block: Rect, theme: &Theme) {
+        if !self.open || self.options.is_empty() {
             return;
         }
-        self.request_pending = true;
-        let card = self.card_name.as_deref().map(|s| s.to_string());
-        ctx.send(Command::SearchSets {
-            q: self.last_query.clone(),
-            card,
-            limit: 20,
-        });
-    }
-
-    pub fn tick(&mut self, dt: f32) -> bool {
-        self.search.tick(dt)
-    }
-
-    pub fn set_focused(&mut self, focused: bool) {
-        self.focused = focused;
-        self.search.set_focused(focused);
-    }
-
-    pub fn is_focused(&self) -> bool {
-        self.focused
-    }
-
-    pub fn value(&self) -> &str {
-        self.search.value()
-    }
-
-    pub fn set_value(&mut self, value: &str) {
-        self.search.set_value(value);
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.search.is_empty()
-    }
-
-    pub fn focus(&mut self) {
-        self.search.focus();
-    }
-
-    pub fn unfocus(&mut self) {
-        self.search.unfocus();
-    }
-
-    pub fn render(
-        &mut self,
-        c: &mut Compositor,
-        rect: Rect,
-        theme: &Theme,
-        _art: &mut ArtCache,
-    ) {
-        // Render the search field
-        let field_rect = Rect::new(rect.x, rect.y, rect.w, 36.0);
-        self.search.render(c, field_rect, theme, &mut crate::art::ArtCache::new());
-
-        // Render dropdown if open
-        if self.open && !self.options.is_empty() {
-            let dropdown_rect = Rect::new(
-                rect.x,
-                rect.y + 36.0 + 4.0,
-                rect.w,
-                (self.options.len() as f32 * 44.0).min(320.0),
-            );
-            self.render_dropdown(c, dropdown_rect, theme);
-        }
-    }
-
-    fn render_dropdown(&self, c: &mut Compositor, bounds: Rect, theme: &Theme) {
-        let glass = &theme.glass;
+        let dd = self.dropdown_rect(block);
         let radius = theme.radius.lg;
-
-        // Floating panel shadow + glass background
-        c.push_to_layer(
-            100, // overlay layer
-            engine::ui::widgets::menu_shadow(bounds, radius),
-        );
-        for node in glass_pill(bounds, radius, glass.edge_soft.0, 1.5, glass.popover.0) {
-            c.push_to_layer(100, node);
+        c.push(menu_shadow(dd, radius));
+        for node in glass_pill(dd, radius, theme.glass.edge_soft.0, 1.5, theme.glass.popover.0) {
+            c.push(node);
         }
 
-        let style = {
-            let mut s = TextStyle::new();
-            s.font_size = 14.0;
-            s.weight = 500;
-            s.line_height = 44.0;
-            s
-        };
-        let text = theme.colors.text;
-
-        let pad_x = 16.0;
-        let pad_y = 8.0;
-
-        for (i, option) in self.options.iter().enumerate() {
-            let oy = bounds.y + 8.0 + i as f32 * 44.0;
-            if oy + 44.0 > bounds.y + bounds.h {
-                break;
-            }
-
-            let is_hovered = self.hovered_idx == Some(i);
-
-            if is_hovered {
-                c.push_to_layer(
-                    100,
-                    engine::compositor::SceneNode::RoundedRect {
-                        x: bounds.x + 4.0,
-                        y: oy,
-                        w: bounds.w - 8.0,
-                        h: 44.0,
-                        color: glass.surface_hover.0,
-                        corner_radius: theme.radius.md,
-                        border_width: 0.0,
-                        border_color: [0.0; 4],
-                    },
-                );
-            }
-
-            let label_alpha = if self.hovered_idx == Some(i) { 0.8 } else { 0.59 };
-            c.push_to_layer(
-                100,
-                SceneNode::Text {
-                    key: TextNodeKey::from_style(
-                        &format!("{} ({})", option.name, option.code.to_uppercase()),
-                        &{
-                            let mut s = TextStyle::new();
-                            s.font_size = 14.0;
-                            s.weight = 500;
-                            s.line_height = 44.0;
-                            s
-                        },
-                        None,
-                    ),
-                    x: bounds.x + 16.0,
-                    y: oy + 22.0,
-                    color: [text.0[0], text.0[1], text.0[2], text.0[3] * label_alpha],
-                },
+        let style = TypographyScale::hoff().base_2sm();
+        for (i, set) in self.options.iter().enumerate() {
+            let row = Rect::new(
+                dd.x + GAP,
+                dd.y + GAP + i as f32 * (ROW_H + GAP),
+                dd.w - GAP * 2.0,
+                ROW_H,
             );
-        }
-    }
-}
-
-impl SetPicker {
-    fn dummy() -> ScreenCtx<'static> {
-        use std::sync::mpsc;
-        let (tx, _rx) = mpsc::channel();
-        ScreenCtx {
-            tx: &tx,
-            actions: &mut Vec::new(),
+            if self.hovered == Some(i) {
+                c.push(rounded_rect(
+                    row.x,
+                    row.y,
+                    row.w,
+                    row.h,
+                    theme.radius.md,
+                    theme.glass.surface_hover.0,
+                ));
+            }
+            let label = format!(
+                "{} ({})",
+                set.name.as_deref().unwrap_or(""),
+                set.code.to_uppercase()
+            );
+            c.push(SceneNode::Text {
+                key: TextNodeKey::from_style(&label, &style, Some(row.w - 16.0)),
+                x: row.x + 8.0,
+                y: row.y + (ROW_H - style.line_height) / 2.0,
+                color: theme.colors.text.0,
+            });
         }
     }
 }
@@ -381,9 +296,9 @@ mod tests {
 
     #[test]
     fn set_picker_creation() {
-        let theme = crate::engine::theme::Theme::hoff();
-        let picker = SetPicker::new_without_callback("Nome ou código da edição…", &theme);
-        assert!(picker.value().is_empty());
+        let theme = engine::theme::Theme::hoff();
+        let picker = SetPicker::new("Edição", &theme, None);
+        assert!(picker.code().is_none());
         assert!(!picker.is_open());
     }
 }

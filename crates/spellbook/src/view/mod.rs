@@ -157,6 +157,8 @@ pub enum EditKey {
     Delete,
     Left,
     Right,
+    Up,
+    Down,
     Home,
     End,
 }

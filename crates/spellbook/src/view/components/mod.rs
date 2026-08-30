@@ -21,15 +21,13 @@
 
 #![allow(dead_code)]
 
-pub use crate::view::{EditKey, ScreenAction, ScreenCtx};
+pub use crate::view::{EditKey, ScreenCtx};
 
 // The screens that own these components land in the next commit; until then
 // nothing references them.
 
 pub mod add_card;
 pub mod card_modal;
-pub mod confirm;
 pub mod field;
 pub mod modal;
-pub mod search_field;
 pub mod set_picker;

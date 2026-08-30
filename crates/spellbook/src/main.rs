@@ -166,6 +166,8 @@ impl ApplicationHandler<AppEvent> for App {
                             NamedKey::Delete => Some(EditKey::Delete),
                             NamedKey::ArrowLeft => Some(EditKey::Left),
                             NamedKey::ArrowRight => Some(EditKey::Right),
+                            NamedKey::ArrowUp => Some(EditKey::Up),
+                            NamedKey::ArrowDown => Some(EditKey::Down),
                             NamedKey::Home => Some(EditKey::Home),
                             NamedKey::End => Some(EditKey::End),
                             _ => None,
