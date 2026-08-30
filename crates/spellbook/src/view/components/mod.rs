@@ -2,7 +2,8 @@
 //!
 //! Ports of the web UI's `js/ui/` helpers. Each component is a retained
 //! struct owned by a screen: the screen feeds it events, reads its answers,
-//! and calls `render` inside its own overlay render pass.
+//! through an explicit `take_*` or a `ScreenAction`, and calls `render`
+//! inside its own overlay render pass.
 //!
 //! Answers flow one way, uniformly across the components: a component NEVER
 //! receives a `ScreenCtx`. Instead every `handle_event`/`handle_edit_key`
@@ -14,10 +15,16 @@
 //! async `SearchSets`/`SearchCards` round trip driven by typing, so their
 //! methods take `&mut ScreenCtx` purely to send commands. No component ever
 //! pushes its own toast or navigates.
+//!
+//! Re-exports from the parent shell so components can use them without
+//! `super::super::` chains.
+
+#![allow(dead_code)]
+
+pub use crate::view::{EditKey, ScreenAction, ScreenCtx};
 
 // The screens that own these components land in the next commit; until then
 // nothing references them.
-#![allow(dead_code)]
 
 pub mod add_card;
 pub mod card_modal;

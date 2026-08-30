@@ -11,6 +11,11 @@ use engine::ui::widgets::{EventResult, WidgetEvent, focus_ring};
 use super::{EditKey, ScreenCtx};
 use crate::art::ArtCache;
 
+/// Layout constants for the field.
+pub const FIELD_FONT: f32 = 16.0;
+pub const FIELD_H: f32 = FIELD_FONT * 2.0;
+const TEXT_PAD: f32 = 8.0;
+
 /// A labeled text field with optional placeholder, focus handling,
 /// and integration with the shell's keyboard routing.
 pub struct LabeledField {
@@ -28,7 +33,7 @@ impl LabeledField {
     ) -> Self {
         let mut input = TextInput::new()
             .with_placeholder(placeholder)
-            .with_font_size(16.0)
+            .with_font_size(FIELD_FONT)
             .with_text_color(theme.colors.text.0)
             .with_bg_color(theme.glass.field.0);
         input.placeholder_color = theme.glass.text_placeholder.0;
@@ -117,7 +122,7 @@ impl LabeledField {
     /// Handle mouse click on the field. `local_x` is relative to field left edge.
     pub fn handle_click(&mut self, local_x: f32) {
         self.focus();
-        self.input.handle_click(local_x - 8.0); // TEXT_PAD = 8.0
+        self.input.handle_click(local_x - TEXT_PAD);
     }
 
     /// Advance cursor blink. Returns true while focused (needs frames).
@@ -256,7 +261,7 @@ impl LabeledField {
 
     pub fn handle_click(&mut self, local_x: f32) {
         self.focus();
-        self.input.handle_click(local_x - 8.0); // TEXT_PAD = 8.0
+        self.input.handle_click(local_x - TEXT_PAD);
     }
 }
 

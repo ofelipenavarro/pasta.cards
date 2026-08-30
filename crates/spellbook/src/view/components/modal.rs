@@ -4,7 +4,7 @@
 //! glass panel, title, body, and confirm/cancel buttons. We wrap it to
 //! integrate with our ScreenCtx (commands, toasts, navigation).
 
-use engine::compositor::{Compositor, LayerId, Rect};
+use engine::compositor::{Compositor, LayerId};
 use engine::theme::{Intent, Theme};
 use engine::ui::widgets::{EventResult, Modal as EngineModal, WidgetEvent};
 
