@@ -1,38 +1,44 @@
-//! Search field with a clear ("x") button. Port of
-//! `desktop/ui/js/ui/search-field.js` (`attachClear`).
+//! Search input with a clear ("x") button and change notification.
 //!
-//! Behavior carried over: the clear button only exists while there is
-//! something to clear, clicking it empties the buffer and keeps the focus,
-//! and Escape clears too. The screen's own handler reacts to the cleared
-//! value the same way it reacts to typed edits - through `changed`, so a
-//! clear is indistinguishable from deleting the text by hand, just as the
-//! JS dispatched a real `input` event.
+//! Port of `desktop/ui/js/ui/search-field.js`. Wraps a `LabeledField`
+//! and adds a clear button that appears when there's text.
 
-use engine::compositor::Compositor;
+use engine::compositor::{Compositor, Rect};
 use engine::theme::Theme;
-use engine::ui::icons;
-use engine::ui::widgets::{EventResult, Rect, WidgetEvent, rounded_rect};
+use engine::ui::widgets::{EventResult, WidgetEvent};
 
-use super::super::EditKey;
-use super::field::{FIELD_H, LabeledField};
+use super::{EditKey, LabeledField, ScreenCtx};
+use crate::art::ArtCache;
 
-/// Clear-button square inside the field.
-const CLEAR: f32 = 24.0;
-
-/// One search field. Unlabeled on purpose: the three screens that had one
-/// labelled it in their own chrome ("Buscar…" placeholder), and the port
-/// keeps it that way - use [`super::field::LabeledField`] when a form row
-/// needs a label.
+/// Search field with clear button. Emits `on_changed` callback when
+/// the text changes (debounced externally by the screen if needed).
 pub struct SearchField {
-    pub field: LabeledField,
-    hovered_clear: bool,
+    field: LabeledField,
+    clear_visible: bool,
+    on_changed: Option<Box<dyn Fn(&str) + Send + Sync>>,
 }
 
 impl SearchField {
-    pub fn new(placeholder: &str, theme: &Theme) -> Self {
+    pub fn new(
+        placeholder: impl Into<String>,
+        theme: &Theme,
+        on_changed: impl Fn(&str) + Send + Sync + 'static,
+    ) -> Self {
+        let field = LabeledField::new("", placeholder, theme);
         Self {
-            field: LabeledField::new("", placeholder, theme),
-            hovered_clear: false,
+            field,
+            clear_visible: false,
+            on_changed: Some(Box::new(on_changed)),
+        }
+    }
+
+    /// Create without an on_changed callback (for manual polling).
+    pub fn new_without_callback(placeholder: impl Into<String>, theme: &Theme) -> Self {
+        let field = LabeledField::new("", placeholder, theme);
+        Self {
+            field,
+            clear_visible: false,
+            on_changed: None,
         }
     }
 
@@ -40,116 +46,215 @@ impl SearchField {
         self.field.value()
     }
 
+    pub fn set_value(&mut self, value: &str) {
+        self.field.set_value(value);
+        self.update_clear_visibility();
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.field.is_empty()
+    }
+
+    pub fn focus(&mut self) {
+        self.field.focus();
+    }
+
+    pub fn unfocus(&mut self) {
+        self.field.unfocus();
+    }
+
     pub fn is_focused(&self) -> bool {
-        self.field.input.focused
+        self.field.is_focused()
     }
 
-    /// The plain field rect at `(x, y)`, full width.
-    pub fn rect(&self, x: f32, y: f32, w: f32) -> Rect {
-        Rect::new(x, y, w, FIELD_H)
+    fn update_clear_visibility(&mut self) {
+        self.clear_visible = !self.field.is_empty();
     }
 
-    fn clear_rect(&self, field: Rect) -> Rect {
-        Rect::new(
-            field.x + field.w - CLEAR - (field.h - CLEAR) / 2.0,
-            field.y + (field.h - CLEAR) / 2.0,
-            CLEAR,
-            CLEAR,
-        )
-    }
-
-    /// Focus + caret at the clicked glyph; a hit on the clear button clears.
-    /// Returns the result plus whether the buffer changed.
-    pub fn handle_event(&mut self, event: &WidgetEvent, field: Rect) -> EventResult {
-        let clear = self.clear_rect(field);
-        let has_value = !self.field.value().is_empty();
-        match *event {
-            WidgetEvent::MouseMove { x, y } => {
-                let hovered = has_value && clear.contains(x, y);
-                if hovered != self.hovered_clear {
-                    self.hovered_clear = hovered;
-                    return EventResult::changed();
-                }
-                EventResult::IGNORED
-            }
-            WidgetEvent::MouseDown { x, y } => {
-                if has_value && clear.contains(x, y) {
-                    self.field.set_value("");
-                    // Clearing keeps the focus, as the JS did.
-                    self.field.input.focus();
-                    return EventResult::clicked();
-                }
-                if field.contains(x, y) {
-                    self.field.click(x - field.x);
-                    return EventResult::changed();
-                }
-                // A click elsewhere blurs.
-                if self.field.input.focused {
-                    self.field.input.unfocus();
-                    return EventResult::changed();
-                }
-                EventResult::IGNORED
-            }
-            _ => EventResult::IGNORED,
-        }
-    }
-
-    /// Escape clears (the habit every search field trained), then the field
-    /// keeps the focus for the next query.
-    pub fn handle_escape(&mut self) -> bool {
-        if self.field.input.focused && !self.field.value().is_empty() {
-            self.field.set_value("");
-            return true;
-        }
-        false
-    }
-
+    // Keyboard handling
     pub fn handle_text(&mut self, s: &str) -> bool {
-        self.field.handle_text(s)
+        let consumed = self.field.handle_text(s);
+        self.update_clear_visibility();
+        if let Some(cb) = &self.on_changed {
+            cb(self.field.value());
+        }
+        consumed
     }
 
-    pub fn handle_edit_key(&mut self, key: EditKey) -> (bool, bool) {
-        self.field.handle_edit_key(key)
+    pub fn handle_edit_key(&mut self, key: super::EditKey) -> bool {
+        if key == super::EditKey::Escape && !self.field.is_empty() {
+            // Escape clears the field
+            self.field.set_value("");
+            self.update_clear_visibility();
+            if let Some(cb) = &self.on_changed {
+                cb("");
+            }
+            true
+        } else {
+            self.field.handle_edit_key(key)
+        }
+    }
+
+    pub fn handle_click(&mut self, local_x: f32, field_rect: Rect) {
+        let clear_btn_x = 32.0; // right padding area
+        if self.clear_visible && local_x >= field_rect.w - clear_btn_x {
+            // Clicked clear button
+            self.field.set_value("");
+            self.update_clear_visibility();
+            if let Some(cb) = &self.on_changed {
+                cb("");
+            }
+        } else {
+            self.field.handle_click(local_x);
+        }
     }
 
     pub fn tick(&mut self, dt: f32) -> bool {
         self.field.tick(dt)
     }
 
-    pub fn render(&self, c: &mut Compositor, field: Rect, theme: &Theme) {
-        // Field body: glass pill + the input's own text/caret, focus-ringed.
-        if self.field.input.focused {
-            c.push(engine::ui::widgets::focus_ring(field, theme.radius.sm, theme));
-        }
-        c.push(rounded_rect(
-            field.x,
-            field.y,
-            field.w,
-            field.h,
+    pub fn set_focused(&mut self, focused: bool) {
+        self.field.set_focused(focused);
+    }
+
+    pub fn is_focused(&self) -> bool {
+        self.field.is_focused()
+    }
+
+    pub fn render(
+        &mut self,
+        c: &mut Compositor,
+        rect: Rect,
+        theme: &Theme,
+        _art: &mut ArtCache,
+    ) {
+        // We don't render a label, just the field with clear button
+        let field_rect = Rect::new(rect.x, rect.y, rect.w, 36.0);
+
+        // Field background
+        c.push(engine::ui::widgets::rounded_rect(
+            field_rect.x,
+            field_rect.y,
+            field_rect.w,
+            field_rect.h,
             theme.radius.sm,
-            theme.glass.field.0,
+            self.field.input.bg_color,
         ));
-        for node in self.field.input.build_scene(field.x, field.y, field.w) {
+
+        // Focus ring
+        if self.field.focused {
+            c.push(engine::ui::widgets::focus_ring(
+                field_rect,
+                theme.radius.sm,
+                theme,
+            ));
+        }
+
+        // Text input scene
+        for node in self.field.input.build_scene(field_rect.x, field_rect.y, field_rect.w) {
             c.push(node);
         }
 
-        // Clear button: visible only while there is something to clear.
-        if !self.field.value().is_empty() {
-            let clear = self.clear_rect(field);
-            let fg = if self.hovered_clear {
-                theme.colors.text.0
-            } else {
-                theme.glass.text_faint.0
-            };
-            if let Some(node) = icons::icon_at(
+        // Clear button (x)
+        if self.clear_visible {
+            let btn_size = 24.0;
+            let btn_x = field_rect.x + field_rect.w - 28.0;
+            let btn_y = field_rect.y + 6.0;
+            let btn_rect = Rect::new(btn_x, btn_y, btn_size, btn_size);
+
+            // Button background
+            c.push(engine::ui::widgets::rounded_rect(
+                btn_rect.x,
+                btn_rect.y,
+                btn_rect.w,
+                btn_rect.h,
+                theme.radius.sm,
+                theme.glass.surface_active.0,
+            ));
+
+            // X icon
+            if let Some(node) = engine::ui::icons::icon_at(
                 "x",
-                13.0,
-                fg,
-                clear.x + (clear.w - 13.0) / 2.0,
-                clear.y + (clear.h - 13.0) / 2.0,
+                14.0,
+                theme.colors.text_dim.0,
+                btn_rect.x + 5.0,
+                btn_rect.y + 5.0,
             ) {
                 c.push(node);
             }
         }
+
+        // Also render the inner text input scene
+        for node in self.field.input.build_scene(rect.x, rect.y, rect.w) {
+            c.push(node);
+        }
+    }
+
+    pub fn handle_event(
+        &mut self,
+        event: &WidgetEvent,
+        rect: Rect,
+        _ctx: &mut super::ScreenCtx,
+    ) -> bool {
+        let field_rect = Rect::new(rect.x, rect.y, rect.w, 36.0);
+
+        match event {
+            WidgetEvent::MouseDown { x, y } => {
+                if self.clear_visible {
+                    let btn_x = rect.x + rect.w - 28.0;
+                    let btn_y = rect.y + 6.0;
+                    if Rect::new(rect.x + rect.w - 28.0, rect.y + 6.0, 24.0, 24.0).contains(x, y) {
+                        // Clear button clicked
+                        self.field.set_value("");
+                        self.clear_visible = false;
+                        if let Some(cb) = &self.on_changed {
+                            cb("");
+                        }
+                        return true;
+                    }
+                }
+                // Delegate to field
+                self.field.handle_event(event, rect, &mut super::ScreenCtx::dummy())
+            }
+            _ => self.field.handle_event(event, rect, &mut super::ScreenCtx::dummy()),
+        }
+    }
+
+    pub fn tick(&mut self, dt: f32) -> bool {
+        self.field.tick(dt)
+    }
+
+    pub fn set_focused(&mut self, focused: bool) {
+        self.field.set_focused(focused);
+    }
+
+    pub fn is_focused(&self) -> bool {
+        self.field.is_focused()
+    }
+}
+
+impl SearchField {
+    /// Dummy ScreenCtx for internal event handling
+    fn dummy() -> ScreenCtx<'static> {
+        use std::sync::mpsc;
+        let (tx, _rx) = mpsc::channel();
+        ScreenCtx {
+            tx: &tx,
+            actions: &mut Vec::new(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn search_field_clears() {
+        let theme = crate::engine::theme::Theme::hoff();
+        let mut field = SearchField::new_without_callback("Buscar...", &theme);
+        field.set_value("test");
+        assert_eq!(field.value(), "test");
+        assert!(field.clear_visible);
     }
 }
