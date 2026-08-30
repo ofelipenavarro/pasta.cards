@@ -12,7 +12,7 @@ use engine::ui::widgets::{
 use spellbook_core::client::{Command, Event};
 use spellbook_core::ops::decks::{DeckDetail, DeckSummary, DeleteMode};
 
-use super::super::{ScreenCtx, text};
+use super::super::{EditKey, ScreenCtx, text};
 use super::modal::{ModalFrame, PAD as MODAL_PAD};
 
 const WIDTH: f32 = 440.0;

@@ -5,7 +5,7 @@
 //! 99 non-commander cards after the deck shell is created.
 
 use engine::compositor::{Compositor, LayerId, SceneNode, TextNodeKey};
-use engine::theme::{Intent, Theme, TypographyScale};
+use engine::theme::{Theme, TypographyScale};
 use engine::ui::widgets::{
     Button, ButtonVariant, Checkbox, EventResult, Rect, Select, WidgetEvent, rounded_rect,
 };
@@ -15,7 +15,7 @@ use spellbook_core::types::Card;
 use spellbook_core::wizard::AutoBuildIn;
 
 use super::super::{EditKey, ScreenCtx, text, with_alpha};
-use super::field::{FIELD_FONT, LabeledField};
+use super::field::LabeledField;
 use super::modal::{ModalFrame, PAD as MODAL_PAD};
 
 const WIDTH: f32 = 480.0;
@@ -86,6 +86,8 @@ pub struct NewDeckModal {
     build_phase: BuildPhase,
     status_poll_timer: f32,
     open: bool,
+    /// Deck id from a non-autobuild create, waiting to be reported to the screen.
+    created_id: Option<i64>,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -151,12 +153,26 @@ impl NewDeckModal {
             error: None,
             build_phase: BuildPhase::Idle,
             status_poll_timer: 0.0,
+            open: false,
+            created_id: None,
         }
     }
 
     pub fn open(&mut self, ctx: &mut ScreenCtx) {
         self.reset();
+        self.open = true;
         self.set_focus(Some(Slot::Commander), ctx);
+    }
+
+    pub fn is_open(&self) -> bool {
+        self.open
+    }
+
+    pub fn close(&mut self) {
+        self.open = false;
+        self.focus = None;
+        self.suggestions.clear();
+        self.suggestions2.clear();
     }
 
     fn reset(&mut self) {

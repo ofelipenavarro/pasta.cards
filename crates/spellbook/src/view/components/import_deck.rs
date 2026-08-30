@@ -7,12 +7,12 @@
 use engine::compositor::{Compositor, LayerId, SceneNode, TextNodeKey};
 use engine::theme::{Theme, TypographyScale};
 use engine::ui::widgets::{
-    Button, ButtonVariant, Chip, EventResult, Intent, Rect, WidgetEvent, rounded_rect,
+    Button, ButtonVariant, Chip, EventResult, Rect, WidgetEvent, rounded_rect,
 };
 use spellbook_core::client::{Command, Event};
 use spellbook_core::ops::decks::{ImportCard, ImportMode, ImportPreview};
 
-use super::super::{EditKey, ScreenCtx, text, with_alpha};
+use super::super::{EditKey, ScreenCtx, text};
 use super::field::{FIELD_FONT, LabeledField};
 use super::modal::{ModalFrame, PAD as MODAL_PAD};
 
