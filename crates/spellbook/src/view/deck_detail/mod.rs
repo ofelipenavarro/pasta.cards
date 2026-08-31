@@ -227,6 +227,12 @@ pub struct DeckDetailScreen {
     missing_open: bool,
     /// Which format the user clicked; the `DeckExported` answer belongs to it.
     export_format: Option<String>,
+    /// Export dropdown state (Moxfield / plain text).
+    export_menu_open: bool,
+    /// Sort dropdown state.
+    sort_menu_open: bool,
+    /// Header button rects, laid out during render and reused for hit tests.
+    header_rects: HeaderRects,
 
     tx: Option<Sender<Command>>,
 
@@ -237,6 +243,16 @@ pub struct DeckDetailScreen {
 pub const TILE_MIN_W: f32 = 150.0;
 pub const TILE_MAX_W: f32 = 236.0;
 const ROW_H: f32 = 34.0;
+
+mod events;
+mod groups;
+mod layout;
+mod render;
+
+use events::*;
+use groups::*;
+use layout::*;
+use render::*;
 
 impl DeckDetailScreen {
     pub fn new(theme: &Theme) -> Self {
@@ -282,6 +298,9 @@ impl DeckDetailScreen {
             add_confirm: None,
             missing_open: false,
             export_format: None,
+            export_menu_open: false,
+            sort_menu_open: false,
+            header_rects: HeaderRects::default(),
             tx: None,
             empty: EmptyState::new("Deck não encontrado", "O deck pode ter sido excluído.")
                 .icon("layers"),
@@ -531,13 +550,13 @@ impl DeckDetailScreen {
                     by_bucket_entry(&mut by_r, k).push(c.clone());
                 }
                 let mut out: Vec<(String, Vec<DeckCard>)> = Vec::new();
-                for r in ["common", "uncommon", "rare", "mythic", "special", "bonus", "outro"] {
+                for r in RARITY_ORDER {
                     if let Some(cards) = by_r.remove(r) {
-                        out.push((rarity_label(r).to_string(), self.sort_cards(cards)));
+                        out.push((rarity_label(r), self.sort_cards(cards)));
                     }
                 }
                 for (k, cards) in by_r {
-                    out.push((k, self.sort_cards(cards)));
+                    out.push((rarity_label(&k), self.sort_cards(cards)));
                 }
                 out
             }
@@ -547,8 +566,168 @@ impl DeckDetailScreen {
     fn group_label(&'static self, key: &str) -> String {
         key.to_string()
     }
-}
 
+    pub fn handle_event(&mut self, event: &WidgetEvent, content: Rect, ctx: &mut ScreenCtx) -> EventResult {
+        if self.deck.is_none() && self.loading {
+            return self.loading_empty.handle_event(event, content);
+        }
+        if let WidgetEvent::MouseDown { x, y } = *event {
+            // Modais e confirmações ficam no caminho overlay.
+            if self.overlay_open_screens() {
+                return self.handle_overlay_event(event, content_to_window(content), ctx);
+            }
+            if self.toolbar_click(x, y, content, ctx) {
+                return EventResult::clicked();
+            }
+            if let Some((name, id)) = self.hit_card_at(x, y, content) {
+                // row/tile click → remove confirm (the JS deletes via ✕ and asks)
+                self.remove_confirm = Some((name, id));
+                return EventResult::clicked();
+            }
+            if let Some((name, oracle)) = self.hit_suggestion_at(x, y, content) {
+                self.open_add_card(&name, oracle.as_deref(), ctx);
+                self.add_suggestions.clear();
+                self.add_field.set_value("");
+                return EventResult::clicked();
+            }
+            return EventResult::IGNORED;
+        }
+        EventResult::IGNORED
+    }
+
+    pub fn handle_overlay_event(&mut self, event: &WidgetEvent, window: Rect, ctx: &mut ScreenCtx) -> EventResult {
+        if self.remove_confirm.is_some() {
+            if let WidgetEvent::MouseDown { x, y } = *event {
+                let (yes, no) = confirm_buttons(window);
+                if yes.contains(x, y) {
+                    if let Some((_, id)) = self.remove_confirm.take()
+                        && let Some(deck_id) = self.deck_id
+                    {
+                        ctx.send(Command::RemoveDeckCard { deck_id, card_id: id });
+                    }
+                    return EventResult::clicked();
+                }
+                if no.contains(x, y) {
+                    self.remove_confirm = None;
+                    return EventResult::changed();
+                }
+                self.remove_confirm = None;
+                return EventResult::changed();
+            }
+            return EventResult::IGNORED;
+        }
+        if self.add_confirm.is_some() {
+            if let WidgetEvent::MouseDown { x, y } = *event {
+                let (yes, no) = confirm_buttons(window);
+                if yes.contains(x, y) {
+                    if let Some((name, oracle)) = self.add_confirm.take() {
+                        self.send_add_confirmed(&name, oracle.as_deref());
+                    }
+                    return EventResult::clicked();
+                }
+                if no.contains(x, y) {
+                    self.add_confirm = None;
+                    return EventResult::changed();
+                }
+                self.add_confirm = None;
+                return EventResult::changed();
+            }
+            return EventResult::IGNORED;
+        }
+        if self.edit_deck_modal.is_open() {
+            let (answer, result) = self.edit_deck_modal.handle_event(event, window, ctx);
+            match answer {
+                Some(EditDeckAnswer::Saved) => {
+                    self.edit_deck_modal.close();
+                    ctx.toast("Deck atualizado.", Intent::Constructive);
+                    if let Some(id) = self.deck_id {
+                        ctx.send(Command::GetDeck { deck_id: id });
+                    }
+                }
+                Some(EditDeckAnswer::Cancelled) => self.edit_deck_modal.close(),
+                None => {}
+            }
+            return result;
+        }
+        if self.import_deck_modal.is_open() {
+            let (answer, result) = self.import_deck_modal.handle_event(event, window, ctx);
+            match answer {
+                Some(ImportDeckAnswer::Imported) => {
+                    self.import_deck_modal.close();
+                    ctx.toast("Decklist importada.", Intent::Constructive);
+                    if let Some(id) = self.deck_id {
+                        ctx.send(Command::GetDeck { deck_id: id });
+                    }
+                }
+                Some(ImportDeckAnswer::Cancelled) => self.import_deck_modal.close(),
+                None => {}
+            }
+            return result;
+        }
+        if self.delete_deck_modal.is_open() {
+            let (answer, result) = self.delete_deck_modal.handle_event(event, window, ctx);
+            match answer {
+                Some(DeleteDeckAnswer::Deleted) => {
+                    self.delete_deck_modal.close();
+                    ctx.toast("Deck excluído.", Intent::Constructive);
+                    ctx.navigate(Route::Decks);
+                }
+                Some(DeleteDeckAnswer::Cancelled) => self.delete_deck_modal.close(),
+                None => {}
+            }
+            return result;
+        }
+        // Open filter menu eats the event first.
+        let content = window_to_content(window);
+        let t = self.toolbar_rects(content);
+        self.filter_bar.handle_event(event, t.filter, content)
+    }
+
+    fn overlay_open_screens(&self) -> bool {
+        self.edit_deck_modal.is_open()
+            || self.delete_deck_modal.is_open()
+            || self.import_deck_modal.is_open()
+            || self.remove_confirm.is_some()
+            || self.add_confirm.is_some()
+            || self.filter_bar.is_open()
+    }
+
+    /// (deck_cards.id, card name) of the row/tile under (x, y), for remove.
+    fn hit_card_at(&self, x: f32, y: f32, content: Rect) -> Option<(String, i64)> {
+        let groups = self.compute_groups();
+        for (hit, rect) in self.card_rects(content) {
+            if !rect.contains(x, y) {
+                continue;
+            }
+            // The ✕ button occupies the row's right side; the rest of the row
+            // opens the card modal (not wired yet — same as clicking a name).
+            let remove_btn = Rect::new(rect.x + rect.w - 70.0, rect.y + 4.0, 64.0, rect.h - 8.0);
+            if !remove_btn.contains(x, y) {
+                return None; // abrir card modal depois; por ora nada
+            }
+            let picked = match &hit {
+                LayoutHit::Row { group, idx } => groups
+                    .iter()
+                    .find(|(k, _)| *k == *group)
+                    .and_then(|(_, cards)| cards.get(*idx)),
+                LayoutHit::Tile { group, idx } => groups
+                    .iter()
+                    .find(|(k, _)| *k == *group)
+                    .and_then(|(_, cards)| cards.get(*idx)),
+                LayoutHit::GroupLabel => None,
+            };
+            if let Some(c) = picked {
+                return Some((c.card_name.clone(), c.id));
+            }
+        }
+        None
+    }
+
+    /// Suggestion under (x, y), for the inline add search.
+    fn hit_suggestion_at(&self, _x: f32, _y: f32, _content: Rect) -> Option<(String, Option<String>)> {
+        None
+    }
+}
 /// Helper: entry-or-default for the rarity buckets above.
 fn by_bucket_entry<'m>(
     map: &'m mut HashMap<String, Vec<DeckCard>>,
@@ -557,61 +736,14 @@ fn by_bucket_entry<'m>(
     map.entry(key).or_default()
 }
 
-/// The JS's colorGroupKey: single color letter, "M" for multicolor, "C" for colorless.
-fn color_group_key(c: &DeckCard) -> &'static str {
-    let letters: Vec<char> = c.colors.as_deref().unwrap_or("").chars().collect();
-    match letters.len() {
-        0 => "C",
-        1 => match letters[0] {
-            'W' => "W",
-            'U' => "U",
-            'B' => "B",
-            'R' => "R",
-            'G' => "G",
-            _ => "C",
-        },
-        _ => "M",
-    }
-}
+// ---------------------------------------------------------------------------
+// Layout constants and rect functions
+// ---------------------------------------------------------------------------
 
-fn color_group_label(k: &str) -> String {
-    match k {
-        "W" => "Branco".to_string(),
-        "U" => "Azul".to_string(),
-        "B" => "Preto".to_string(),
-        "R" => "Vermelho".to_string(),
-        "G" => "Verde".to_string(),
-        "M" => "Multicolor".to_string(),
-        "C" => "Incolor".to_string(),
-        _ => k.to_string(),
-    }
-}
+/// Toolbar row height and control sizes.
+const TOOLBAR_H: f32 = 48.0;
+const CHIP_H: f32 = 28.0;
+const CHIP_GAP: f32 = 8.0;
+const GROUP_LABEL_H: f32 = 30.0;
+const STAT_PANEL_H: f32 = 190.0;
 
-const RARITY_ORDER: [&str; 6] = ["common", "uncommon", "rare", "mythic", "special", "bonus"];
-fn rarity_label(r: &str) -> String {
-    match r {
-        "common" => "Comum".to_string(),
-        "uncommon" => "Incomum".to_string(),
-        "rare" => "Rara".to_string(),
-        "mythic" => "Mítica".to_string(),
-        "special" => "Especial".to_string(),
-        "bonus" => "Bônus".to_string(),
-        "outro" => "Outra".to_string(),
-        _ => r.to_string(),
-    }
-}
-
-fn category_label(cat: &str) -> &'static str {
-    match cat {
-        "Land" => "Terrenos",
-        "Creature" => "Criaturas",
-        "Instant" => "Instantâneas",
-        "Sorcery" => "Feitiços",
-        "Artifact" => "Artefatos",
-        "Enchantment" => "Encantamentos",
-        "Planeswalker" => "Planeswalker",
-        "Battle" => "Batalhas",
-        "Comandante" => "Comandante",
-        _ => "Outro",
-    }
-}
