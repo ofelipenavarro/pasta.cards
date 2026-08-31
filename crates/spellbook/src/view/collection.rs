@@ -20,12 +20,15 @@ use super::{EditKey, Route, ScreenCtx, grid_columns, text};
 use crate::art::ArtCache;
 use crate::view::components::add_card::{AddCardAnswer, AddCardModal};
 use crate::view::components::card_modal::{CardModal, CardModalAnswer};
+use crate::view::components::filters::{FilterBar, matches_filters};
 use crate::view::components::search_field::SearchField;
 
 const SEARCH_H: f32 = 52.0; // LabeledField::height()
 const SEARCH_W: f32 = 260.0;
 const CHIP_H: f32 = 24.0;
 const CHIP_GAP: f32 = 8.0;
+const FILTER_TOGGLE_W: f32 = 40.0;
+const FILTER_TOGGLE_H: f32 = 36.0;
 const GRID_GAP: f32 = 16.0;
 const TILE_MIN_W: f32 = 160.0;
 const TILE_MAX_W: f32 = 240.0;
@@ -50,6 +53,7 @@ pub struct CollectionScreen {
     search: String,
     search_field: SearchField,
     status_chips: [Chip; 3],
+    filter_bar: FilterBar,
     add_btn: Button,
     add_card_modal: AddCardModal,
     add_card_open: bool,
@@ -60,6 +64,10 @@ pub struct CollectionScreen {
     loading: bool,
     empty: EmptyState,
     loading_empty: EmptyState,
+    filter_empty: EmptyState,
+    /// Content rect of the last layout pass, so overlay-side handling of the
+    /// filter menu computes the same geometry the render drew.
+    last_content: Rect,
     /// Command sender captured on enter so `tick` can fire debounced reloads.
     tx: Option<Sender<Command>>,
 }
@@ -81,6 +89,7 @@ impl CollectionScreen {
                 Chip::new("Em decks").interactive(true),
                 Chip::new("Livres").interactive(true),
             ],
+            filter_bar: FilterBar::new(theme, true),
             add_btn: Button::new("+ Adicionar carta"),
             add_card_modal: AddCardModal::new(theme),
             add_card_open: false,
@@ -99,6 +108,12 @@ impl CollectionScreen {
                 "Lendo as cópias do banco local.",
             )
             .icon("book-open"),
+            filter_empty: EmptyState::new(
+                "Nenhuma carta corresponde aos filtros",
+                "Ajuste ou limpe os filtros para ver mais cartas.",
+            )
+            .icon("book-open"),
+            last_content: Rect::new(0.0, 0.0, 800.0, 600.0),
             tx: None,
         }
     }
@@ -215,8 +230,17 @@ impl CollectionScreen {
         animating
     }
 
+    /// Filtered view: server search already applied; the chip filters run
+    /// client-side over the loaded list, exactly as the JS did.
+    fn visible_entries(&self) -> Vec<&CollectionEntry> {
+        self.entries
+            .iter()
+            .filter(|e| matches_filters(*e, &self.filter_bar.state))
+            .collect()
+    }
+
     pub fn overlay_open(&self) -> bool {
-        self.add_card_open || self.card_modal.is_some()
+        self.add_card_open || self.card_modal.is_some() || self.filter_bar.is_open()
     }
 
     pub fn handle_overlay_event(
@@ -248,6 +272,14 @@ impl CollectionScreen {
             }
             return result;
         }
+        // Open filter menu floats over the grid and eats the event first.
+        let toggle = self.filter_toggle_rect(self.last_content);
+        let result = self
+            .filter_bar
+            .handle_event(event, toggle, window);
+        if result.clicked || result.changed {
+            return result;
+        }
         EventResult::IGNORED
     }
 
@@ -263,15 +295,19 @@ impl CollectionScreen {
             self.add_card_modal.render(c, layer, window, theme);
         } else if let Some(modal) = &mut self.card_modal {
             modal.render(c, layer, window, theme, art);
+        } else {
+            // The open filter menu floats over content, outside the scroll clip.
+            let toggle = self.filter_toggle_rect(self.last_content);
+            self.filter_bar.render(c, toggle, layer, theme);
         }
     }
 
     pub fn content_height(&self, content: Rect) -> f32 {
         let controls_bottom = self.grid_y(content);
-        if self.entries.is_empty() {
+        if self.visible_entries().is_empty() {
             return (controls_bottom + 240.0 - content.y).max(content.h);
         }
-        let rects = self.tile_rects(content);
+        let rects = self.visible_tile_rects(content);
         let bottom = rects.last().map(|r| r.y + r.h).unwrap_or(controls_bottom);
         (bottom + 24.0 - content.y).max(content.h)
     }
@@ -282,6 +318,7 @@ impl CollectionScreen {
         content: Rect,
         ctx: &mut ScreenCtx,
     ) -> EventResult {
+        self.last_content = content;
         match *event {
             WidgetEvent::MouseMove { x, y } => {
                 let hover = self.hit_at(x, y, content);
@@ -292,25 +329,34 @@ impl CollectionScreen {
                     EventResult::IGNORED
                 }
             }
-            WidgetEvent::MouseDown { x, y } => match self.hit_at(x, y, content) {
-                Some(Hit::AddButton) => {
-                    self.add_card_open = true;
-                    self.add_card_modal.open(ctx);
-                    EventResult::clicked()
+            WidgetEvent::MouseDown { x, y } => {
+                // The filter toggle lives in the controls row; the menu, when
+                // open, is handled by the overlay path but the toggle itself
+                // must flip here.
+                let toggle = self.filter_toggle_rect(content);
+                if toggle.contains(x, y) {
+                    return self.filter_bar.handle_event(event, toggle, content);
                 }
-                Some(Hit::StatusChip(i)) => {
-                    self.select_status(i, ctx);
-                    EventResult::clicked()
-                }
-                Some(Hit::Card(i)) => {
-                    if let Some(entry) = self.entries.get(i) {
-                        let name = entry.card_name.clone();
-                        self.card_modal = Some(CardModal::open(&name, ctx));
+                match self.hit_at(x, y, content) {
+                    Some(Hit::AddButton) => {
+                        self.add_card_open = true;
+                        self.add_card_modal.open(ctx);
+                        EventResult::clicked()
                     }
-                    EventResult::clicked()
+                    Some(Hit::StatusChip(i)) => {
+                        self.select_status(i, ctx);
+                        EventResult::clicked()
+                    }
+                    Some(Hit::Card(i)) => {
+                        if let Some(entry) = self.visible_entries().get(i) {
+                            let name = entry.card_name.clone();
+                            self.card_modal = Some(CardModal::open(&name, ctx));
+                        }
+                        EventResult::clicked()
+                    }
+                    None => EventResult::IGNORED,
                 }
-                None => EventResult::IGNORED,
-            },
+            }
             _ => EventResult::IGNORED,
         }
     }
@@ -323,6 +369,7 @@ impl CollectionScreen {
         theme: &Theme,
         art: &mut ArtCache,
     ) {
+        self.last_content = content;
         let search_rect = self.search_rect(content);
         self.search_field.render(c, search_rect, theme);
 
@@ -330,27 +377,29 @@ impl CollectionScreen {
             self.status_chips[i].render(c, *rect, theme);
         }
 
+        let toggle_rect = self.filter_toggle_rect(content);
+        // Menu body (when open) renders in the overlay pass; the toggle is inline.
+        self.filter_bar.render(c, toggle_rect, _layer, theme);
+
         let add_rect = self.add_btn_rect(content);
         self.add_btn.render(c, add_rect, theme);
 
-        if self.entries.is_empty() {
-            let empty_rect = Rect::new(
-                content.x,
-                self.grid_y(content),
-                content.w,
-                200.0,
-            );
-            if self.loading {
+        let visible: Vec<&CollectionEntry> = self.visible_entries();
+        if visible.is_empty() {
+            let empty_rect = Rect::new(content.x, self.grid_y(content), content.w, 200.0);
+            if self.loading && self.entries.is_empty() {
                 self.loading_empty.render(c, empty_rect, theme);
+            } else if !self.entries.is_empty() {
+                self.filter_empty.render(c, empty_rect, theme);
             } else {
                 self.empty.render(c, empty_rect, theme);
             }
             return;
         }
 
-        let rects = self.tile_rects(content);
+        let rects = self.visible_tile_rects(content);
         for (i, rect) in rects.iter().enumerate() {
-            if let Some(entry) = self.entries.get(i) {
+            if let Some(entry) = visible.get(i) {
                 let hovered = self.hover == Some(Hit::Card(i));
                 self.render_tile(c, *rect, entry, hovered, art, theme);
             }
@@ -386,15 +435,30 @@ impl CollectionScreen {
         )
     }
 
-    fn grid_y(&self, content: Rect) -> f32 {
-        content.y + SEARCH_H + 24.0
+    /// The filter toggle sits between the status chips and the add button.
+    fn filter_toggle_rect(&self, content: Rect) -> Rect {
+        let chips = self.chip_rects(content);
+        let last = chips.last().copied().unwrap_or(Rect::new(
+            content.x + SEARCH_W + 16.0,
+            content.y,
+            0.0,
+            0.0,
+        ));
+        Rect::new(
+            last.x + last.w + CHIP_GAP,
+            content.y + (SEARCH_H - FILTER_TOGGLE_H) / 2.0,
+            FILTER_TOGGLE_W,
+            FILTER_TOGGLE_H,
+        )
     }
 
-    fn tile_rects(&self, content: Rect) -> Vec<Rect> {
+    /// Tile rects for the *filtered* view — hover/click/render all use this,
+    /// so the rect a click lands in is the rect that was drawn.
+    fn visible_tile_rects(&self, content: Rect) -> Vec<Rect> {
         let (cols, col_w) = grid_columns(content.w, TILE_MIN_W, TILE_MAX_W, GRID_GAP);
         let tile_h = col_w * CARD_ASPECT + BODY_H;
         let y0 = self.grid_y(content);
-        self.entries
+        self.visible_entries()
             .iter()
             .enumerate()
             .map(|(i, _)| {
@@ -409,6 +473,15 @@ impl CollectionScreen {
             .collect()
     }
 
+    fn grid_y(&self, content: Rect) -> f32 {
+        content.y + SEARCH_H + 24.0
+    }
+
+    #[cfg(test)]
+    fn tile_rects(&self, content: Rect) -> Vec<Rect> {
+        self.visible_tile_rects(content)
+    }
+
     fn hit_at(&self, x: f32, y: f32, content: Rect) -> Option<Hit> {
         if self.add_btn_rect(content).contains(x, y) {
             return Some(Hit::AddButton);
@@ -418,7 +491,7 @@ impl CollectionScreen {
                 return Some(Hit::StatusChip(i));
             }
         }
-        for (i, rect) in self.tile_rects(content).iter().enumerate() {
+        for (i, rect) in self.visible_tile_rects(content).iter().enumerate() {
             if rect.contains(x, y) {
                 return Some(Hit::Card(i));
             }

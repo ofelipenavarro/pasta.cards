@@ -241,7 +241,7 @@ conn.close()
             echo "WARNING: Database not created, proceeding with existing or empty state"
           fi
 
-      # --- Build .nest file ---
+      # --- Build .nest file from database ---
       - name: Build .nest file from database
         if: steps.update_db.outputs.db_updated == 'true' || !steps.update_db.outputs.db_updated
         run: |
@@ -250,8 +250,8 @@ conn.close()
           # Ensure data directory exists and has mtg.sqlite
           ls -la data/mtg.sqlite 2>/dev/null || echo "No mtg.sqlite in data dir, checking..."
           
-          # Run the build script - it will use whatever mtg.sqlite is available
-          python3 scripts/build_nest.py "data/mtg.sqlite" "corpus.nest"
+          # Run the build script - output to data/dataset/cards/ as requested
+          python3 scripts/build_nest.py "data/mtg.sqlite" "data/dataset/cards/corpus.nest"
           echo "nest_built=true" >> "$GITHUB_OUTPUT"
 
       # --- Commit .nest file back to repository ---
@@ -263,7 +263,7 @@ conn.close()
           git config user.name "spellbook-bot"
           git config user.email "bot@spellbook.dev"
           
-          git add corpus.nest
+          git add data/dataset/cards/corpus.nest
           
           # Check if there are changes to commit
           if git diff --cached --quiet; then

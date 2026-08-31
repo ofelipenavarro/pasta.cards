@@ -13,10 +13,12 @@
 
 mod collection;
 pub mod components;
+mod data_panel;
 mod deck_tile;
 mod decks;
 mod games;
 mod home;
+pub mod mana;
 mod scanner;
 mod wishlist;
 
@@ -213,6 +215,10 @@ pub struct SpellbookView {
 
     pub toasts: ToastManager,
     pub overlay_mgr: OverlayManager,
+    /// Sidebar footer: card-index info + the updater (port of sidebar.js's
+    /// data panel). Lives on the shell, not a screen: the JS version
+    /// persists across every page too.
+    pub data_panel: data_panel::DataPanel,
     layers: Option<Layers>,
 
     home: home::HomeScreen,
@@ -252,6 +258,7 @@ impl SpellbookView {
             page_scroll: std::array::from_fn(|_| ScrollState::new()),
             toasts: ToastManager::new(),
             overlay_mgr: OverlayManager::new(),
+            data_panel: data_panel::DataPanel::new(),
             layers: None,
             home: home::HomeScreen::new(),
             decks: decks::DecksScreen::new(),
@@ -320,6 +327,12 @@ impl SpellbookView {
     /// current route queues whatever it needs.
     pub fn boot(&mut self) {
         self.enter_route();
+        let ctx = ScreenCtx {
+            tx: &self.tx,
+            actions: &mut self.actions,
+        };
+        self.data_panel.boot(&ctx);
+        self.drain_actions();
     }
 
     fn enter_route(&mut self) {
@@ -378,6 +391,7 @@ impl SpellbookView {
                 tx: &self.tx,
                 actions: &mut self.actions,
             };
+            changed |= self.data_panel.on_event(event, &mut ctx);
             changed |= self.home.on_event(event, &mut ctx);
             changed |= self.decks.on_event(event, &mut ctx);
             changed |= self.collection.on_event(event, &mut ctx);
@@ -599,6 +613,19 @@ impl SpellbookView {
     }
 
     fn handle_sidebar(&mut self, event: &WidgetEvent) -> EventResult {
+        // Data panel button (footer band) — click handling first, its rect
+        // overlaps nothing.
+        if let WidgetEvent::MouseDown { .. } = *event {
+            let ctx = ScreenCtx {
+                tx: &self.tx,
+                actions: &mut self.actions,
+            };
+            let panel = Rect::new(0.0, 0.0, SIDEBAR_W, SIDEBAR_FOOTER_H);
+            if self.data_panel.handle_event(event, panel, &ctx) {
+                self.drain_actions();
+                return EventResult::clicked();
+            }
+        }
         let items = self.sidebar_item_rects();
         let viewport = self.sidebar_viewport();
         // Links scrolled outside the band are clipped visually; they must not
@@ -647,6 +674,13 @@ impl SpellbookView {
         let mut animating = false;
         animating |= self.toasts.tick(dt);
         animating |= self.overlay_mgr.tick(dt);
+        {
+            let ctx = ScreenCtx {
+                tx: &self.tx,
+                actions: &mut self.actions,
+            };
+            animating |= self.data_panel.tick(dt, &ctx);
+        }
         animating |= match self.route {
             Route::Home => self.home.tick(dt),
             Route::Decks | Route::Deck(_) => self.decks.tick(dt),
@@ -765,7 +799,7 @@ impl SpellbookView {
             .render(c, layers.toast, &theme, self.width, self.height);
     }
 
-    fn render_sidebar(&self, c: &mut Compositor, theme: &Theme) {
+    fn render_sidebar(&mut self, c: &mut Compositor, theme: &Theme) {
         let glass = &theme.glass;
         let text_c = theme.colors.text;
 
@@ -849,9 +883,9 @@ impl SpellbookView {
         }
         c.push(SceneNode::PopClip);
 
-        // Footer: the offline badge the rail has always carried. The card
-        // index panel lands here once the data commands are wired.
-        let foot_y = self.height - SIDEBAR_FOOTER_H + 24.0;
+        // Footer: the offline badge, then the data panel (info + updater)
+        // the JS sidebar carried across every page.
+        let foot_y = self.height - SIDEBAR_FOOTER_H + 10.0;
         if let Some(node) =
             icons::icon_at("circle", 8.0, theme.colors.success.0, 24.0, foot_y + 4.0)
         {
@@ -866,6 +900,14 @@ impl SpellbookView {
             foot_y,
             glass.text_placeholder.0,
         );
+        let panel = Rect::new(
+            0.0,
+            foot_y + 22.0,
+            SIDEBAR_W,
+            self.height - foot_y - 22.0,
+        );
+        self.data_panel
+            .render(c, panel, theme);
     }
 
     fn render_header(&self, c: &mut Compositor, theme: &Theme) {

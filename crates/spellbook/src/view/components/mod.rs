@@ -32,6 +32,7 @@ pub mod card_modal;
 pub mod delete_deck;
 pub mod edit_deck;
 pub mod field;
+pub mod filters;
 pub mod import_deck;
 pub mod modal;
 pub mod new_deck;

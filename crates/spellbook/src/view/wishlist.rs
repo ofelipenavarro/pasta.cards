@@ -11,6 +11,7 @@ use std::sync::mpsc::Sender;
 
 use engine::compositor::{Compositor, LayerId, SceneNode};
 use engine::theme::{Intent, Theme};
+use engine::ui::{icons};
 use engine::ui::widgets::{
     Button, EmptyState, EventResult, Rect, WidgetEvent, rounded_rect, rounded_rect_stroke,
 };
@@ -22,10 +23,14 @@ use super::{EditKey, Route, ScreenCtx, grid_columns, text};
 use crate::art::ArtCache;
 use crate::view::components::add_card::{AddCardAnswer, AddCardModal};
 use crate::view::components::card_modal::{CardModal, CardModalAnswer};
+use crate::view::components::filters::{FilterBar, matches_filters};
 use crate::view::components::search_field::SearchField;
 
 const SEARCH_H: f32 = 52.0; // LabeledField::height()
 const SEARCH_W: f32 = 260.0;
+const FILTER_TOGGLE_W: f32 = 40.0;
+const FILTER_TOGGLE_H: f32 = 36.0;
+const CHIP_GAP: f32 = 8.0;
 const GRID_GAP: f32 = 16.0;
 const TILE_MIN_W: f32 = 160.0;
 const TILE_MAX_W: f32 = 240.0;
@@ -49,6 +54,9 @@ pub struct WishlistScreen {
     wishes: Vec<WishlistGroup>,
     search: String,
     search_field: SearchField,
+    filter_bar: FilterBar,
+    /// Filtered view of `wishes` — hover/click/render all index into this.
+    visible: Vec<usize>,
     add_btn: Button,
     add_card_modal: AddCardModal,
     add_card_open: bool,
@@ -64,8 +72,11 @@ pub struct WishlistScreen {
     acquiring: Option<usize>,
     /// Group index whose remove is in flight.
     removing: Option<usize>,
+    /// Content rect of the last layout pass, for the filter menu geometry.
+    last_content: Rect,
     empty: EmptyState,
     loading_empty: EmptyState,
+    filter_empty: EmptyState,
     /// Command sender captured on enter so reloads work from anywhere.
     tx: Option<Sender<Command>>,
 }
@@ -79,6 +90,8 @@ impl WishlistScreen {
             wishes: Vec::new(),
             search: String::new(),
             search_field,
+            filter_bar: FilterBar::new(theme, true),
+            visible: Vec::new(),
             add_btn: Button::new("+ Adicionar carta"),
             add_card_modal: AddCardModal::new(theme),
             add_card_open: false,
@@ -90,6 +103,7 @@ impl WishlistScreen {
             loading: true,
             acquiring: None,
             removing: None,
+            last_content: Rect::new(0.0, 0.0, 800.0, 600.0),
             empty: EmptyState::new(
                 "Wishlist vazia",
                 "Adicione cartas que você quer adquirir.",
@@ -98,6 +112,11 @@ impl WishlistScreen {
             loading_empty: EmptyState::new(
                 "Carregando wishlist…",
                 "Lendo seus desejos do banco local.",
+            )
+            .icon("heart"),
+            filter_empty: EmptyState::new(
+                "Nada corresponde aos filtros",
+                "Ajuste ou limpe os filtros para ver mais desejos.",
             )
             .icon("heart"),
             tx: None,
@@ -124,6 +143,7 @@ impl WishlistScreen {
             Event::WishlistListed(list) => {
                 self.wishes = list.clone();
                 self.loading = false;
+                self.recompute_visible();
                 return true;
             }
             Event::WishlistAcquired(result) => {
@@ -250,7 +270,7 @@ impl WishlistScreen {
     }
 
     pub fn overlay_open(&self) -> bool {
-        self.add_card_open || self.card_modal.is_some()
+        self.add_card_open || self.card_modal.is_some() || self.filter_bar.is_open()
     }
 
     pub fn handle_overlay_event(
@@ -283,7 +303,9 @@ impl WishlistScreen {
             }
             return result;
         }
-        EventResult::IGNORED
+        // Open filter menu floats over the grid and eats the event first.
+        let toggle = self.filter_toggle_rect(self.last_content);
+        self.filter_bar.handle_event(event, toggle, window)
     }
 
     pub fn render_overlay(
@@ -298,6 +320,11 @@ impl WishlistScreen {
             self.add_card_modal.render(c, layer, window, theme);
         } else if let Some(modal) = &mut self.card_modal {
             modal.render(c, layer, window, theme, art);
+        } else {
+            // The open filter menu floats over content, outside the scroll clip.
+            let toggle = self.filter_toggle_rect(self.last_content);
+            let _ = art;
+            self.filter_bar.render(c, toggle, layer, theme);
         }
     }
 
@@ -325,7 +352,7 @@ impl WishlistScreen {
         let (cols, col_w) = grid_columns(content.w, TILE_MIN_W, TILE_MAX_W, GRID_GAP);
         let tile_h = col_w * CARD_ASPECT + BODY_H;
         let y0 = self.grid_y(content);
-        self.wishes
+        self.visible
             .iter()
             .enumerate()
             .map(|(i, _)| {
@@ -338,6 +365,17 @@ impl WishlistScreen {
                 )
             })
             .collect()
+    }
+
+    /// The filter toggle sits between the search field and the add button.
+    fn filter_toggle_rect(&self, content: Rect) -> Rect {
+        let search = self.search_rect(content);
+        Rect::new(
+            search.x + search.w + CHIP_GAP,
+            content.y + (SEARCH_H - FILTER_TOGGLE_H) / 2.0,
+            FILTER_TOGGLE_W,
+            FILTER_TOGGLE_H,
+        )
     }
 
     fn hit_at(&self, x: f32, y: f32, content: Rect) -> Option<Hit> {
@@ -373,7 +411,7 @@ impl WishlistScreen {
 
     pub fn content_height(&self, content: Rect) -> f32 {
         let controls_bottom = self.grid_y(content);
-        if self.wishes.is_empty() {
+        if self.visible.is_empty() {
             return (controls_bottom + 240.0 - content.y).max(content.h);
         }
         let rects = self.tile_rects(content);
@@ -389,6 +427,7 @@ impl WishlistScreen {
         content: Rect,
         ctx: &mut ScreenCtx,
     ) -> EventResult {
+        self.last_content = content;
         match *event {
             WidgetEvent::MouseMove { x, y } => {
                 let hover = self.hit_at(x, y, content);
@@ -399,48 +438,70 @@ impl WishlistScreen {
                     EventResult::IGNORED
                 }
             }
-            WidgetEvent::MouseDown { x, y } => match self.hit_at(x, y, content) {
-                Some(Hit::AddButton) => {
-                    self.add_card_open = true;
-                    self.add_card_modal.open(ctx);
-                    EventResult::clicked()
+            WidgetEvent::MouseDown { x, y } => {
+                let toggle = self.filter_toggle_rect(content);
+                if toggle.contains(x, y) {
+                    let r = self.filter_bar.handle_event(event, toggle, content);
+                    self.recompute_visible();
+                    return r;
                 }
-                Some(Hit::Card(i)) => {
-                    if let Some(group) = self.wishes.get(i) {
-                        let name = group.card_name.clone();
-                        self.modal_group = Some(i);
-                        self.card_modal = Some(CardModal::open(&name, ctx));
+                match self.hit_at(x, y, content) {
+                    Some(Hit::AddButton) => {
+                        self.add_card_open = true;
+                        self.add_card_modal.open(ctx);
+                        EventResult::clicked()
                     }
-                    EventResult::clicked()
-                }
-                Some(Hit::Acquire(i)) => {
-                    if let Some(group) = self.wishes.get(i)
-                        && let Some(entry) = group.entries.first()
-                        && !self.wishlist_busy()
-                    {
-                        self.acquiring = Some(i);
-                        ctx.send(Command::AcquireWishlist {
-                            entry_id: entry.id,
-                        });
+                    Some(Hit::Card(i)) => {
+                        if let Some(&gi) = self.visible.get(i) {
+                            let name = self.wishes[gi].card_name.clone();
+                            self.modal_group = Some(gi);
+                            self.card_modal = Some(CardModal::open(&name, ctx));
+                        }
+                        EventResult::clicked()
                     }
-                    EventResult::clicked()
-                }
-                Some(Hit::Remove(i)) => {
-                    if let Some(group) = self.wishes.get(i)
-                        && let Some(entry) = group.entries.first()
-                        && !self.wishlist_busy()
-                    {
-                        self.removing = Some(i);
-                        ctx.send(Command::DeleteWishlist {
-                            entry_id: entry.id,
-                        });
+                    Some(Hit::Acquire(i)) => {
+                        if let Some(&gi) = self.visible.get(i)
+                            && let Some(group) = self.wishes.get(gi)
+                            && let Some(entry) = group.entries.first()
+                            && !self.wishlist_busy()
+                        {
+                            self.acquiring = Some(gi);
+                            ctx.send(Command::AcquireWishlist {
+                                entry_id: entry.id,
+                            });
+                        }
+                        EventResult::clicked()
                     }
-                    EventResult::clicked()
+                    Some(Hit::Remove(i)) => {
+                        if let Some(&gi) = self.visible.get(i)
+                            && let Some(group) = self.wishes.get(gi)
+                            && let Some(entry) = group.entries.first()
+                            && !self.wishlist_busy()
+                        {
+                            self.removing = Some(gi);
+                            ctx.send(Command::DeleteWishlist {
+                                entry_id: entry.id,
+                            });
+                        }
+                        EventResult::clicked()
+                    }
+                    None => EventResult::IGNORED,
                 }
-                None => EventResult::IGNORED,
-            },
+            }
             _ => EventResult::IGNORED,
         }
+    }
+
+    /// Filtered view indices — the chip filters run client-side over the
+    /// loaded list, exactly as the JS wishlist did.
+    fn recompute_visible(&mut self) {
+        self.visible = self
+            .wishes
+            .iter()
+            .enumerate()
+            .filter(|(_, g)| matches_filters(*g, &self.filter_bar.state))
+            .map(|(i, _)| i)
+            .collect();
     }
 
     fn wishlist_busy(&self) -> bool {
@@ -465,14 +526,47 @@ impl WishlistScreen {
         theme: &Theme,
         art: &mut ArtCache,
     ) {
-        self.search_field.render(c, self.search_rect(content), theme);
+        self.last_content = content;
+        let search_rect = self.search_rect(content);
+        self.search_field.render(c, search_rect, theme);
+
+        let toggle_rect = self.filter_toggle_rect(content);
+        self.filter_bar.render(c, toggle_rect, _layer, theme);
+
         let add_rect = self.add_btn_rect(content);
         self.add_btn.render(c, add_rect, theme);
 
-        if self.wishes.is_empty() {
+        // Summary line: total copies · names · price, the JS's `wl-summary`.
+        if !self.wishes.is_empty() {
+            let units: i64 = self.wishes.iter().map(|g| g.total_quantity).sum();
+            let usd: f64 = self
+                .wishes
+                .iter()
+                .filter_map(|g| g.price_usd.as_deref()?.parse::<f64>().ok().map(|p| p * g.total_quantity as f64))
+                .sum();
+            let summary = format!(
+                "{} carta(s) · {} nome(s) · ~${:.2}",
+                units,
+                self.wishes.len(),
+                usd
+            );
+            text(
+                c,
+                &summary,
+                12.0,
+                500,
+                add_rect.x - summary.len() as f32 * 6.4 - 16.0,
+                content.y + (SEARCH_H - 12.0) / 2.0,
+                theme.colors.text_dim.0,
+            );
+        }
+
+        if self.visible.is_empty() {
             let empty_rect = Rect::new(content.x, self.grid_y(content), content.w, 200.0);
-            if self.loading {
+            if self.loading && self.wishes.is_empty() {
                 self.loading_empty.render(c, empty_rect, theme);
+            } else if !self.wishes.is_empty() {
+                self.filter_empty.render(c, empty_rect, theme);
             } else {
                 self.empty.render(c, empty_rect, theme);
             }
@@ -481,7 +575,9 @@ impl WishlistScreen {
 
         let rects = self.tile_rects(content);
         for (i, rect) in rects.iter().enumerate() {
-            if let Some(group) = self.wishes.get(i) {
+            if let Some(&gi) = self.visible.get(i)
+                && let Some(group) = self.wishes.get(gi)
+            {
                 let hovered = matches!(
                     self.hover,
                     Some(Hit::Card(j)) | Some(Hit::Acquire(j)) | Some(Hit::Remove(j))
@@ -629,7 +725,8 @@ impl WishlistScreen {
             );
         }
 
-        // Actions: acquire (moves to collection) and remove one copy.
+        // Actions: "Comprei" (moves to collection) and the trash remove, the
+        // JS tile's two buttons.
         let (acq, rem) = self.action_rects(rect);
         c.push(rounded_rect(
             acq.x,
@@ -641,7 +738,7 @@ impl WishlistScreen {
         ));
         text(
             c,
-            "Adquirir",
+            "Comprei",
             11.0,
             600,
             acq.x + 8.0,
@@ -665,14 +762,15 @@ impl WishlistScreen {
             theme.glass.edge.0,
             1.0,
         ));
+        let _ = icons::icon_at("trash-2", 14.0, theme.colors.danger.0, rem.x + 10.0, rem.y + 7.0);
         text(
             c,
             "Remover",
             11.0,
             600,
-            rem.x + 8.0,
+            rem.x + 30.0,
             rem.y + 7.0,
-            theme.colors.text.0,
+            theme.colors.danger.0,
         );
     }
 }
@@ -748,6 +846,7 @@ mod tests {
         let mut screen = test_screen();
         let (mut ctx, rx) = test_ctx();
         screen.wishes = vec![sample_group()];
+        screen.recompute_visible();
         let content = Rect::new(300.0, 120.0, 800.0, 600.0);
         let rects = screen.tile_rects(content);
         let tile = rects[0];
@@ -773,6 +872,7 @@ mod tests {
         let mut screen = test_screen();
         let (mut ctx, rx) = test_ctx();
         screen.wishes = vec![sample_group()];
+        screen.recompute_visible();
         screen.on_event(&Event::WishlistDeleted(Ok(
             spellbook_core::ops::wishlist::WishlistRemoval {
                 card_name: "Sol Ring".into(),
@@ -816,6 +916,7 @@ mod tests {
         let mut screen = test_screen();
         let (mut ctx, _rx) = test_ctx();
         screen.wishes = vec![sample_group()];
+        screen.recompute_visible();
         let content = Rect::new(300.0, 120.0, 800.0, 600.0);
         let tile = screen.tile_rects(content)[0];
         // Upper half of the tile: art, not the action buttons.

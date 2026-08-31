@@ -11,7 +11,9 @@ use std::sync::mpsc::Sender;
 
 use engine::compositor::{Compositor, LayerId};
 use engine::theme::{Intent, Theme};
-use engine::ui::widgets::{Button, EmptyState, EventResult, Rect, WidgetEvent, rounded_rect};
+use engine::ui::widgets::{
+    Button, EmptyState, EventResult, Rect, WidgetEvent, rounded_rect, rounded_rect_stroke,
+};
 use spellbook_core::client::{Command, Event};
 use spellbook_core::ops::games::{Game, GamesStats};
 
@@ -181,10 +183,10 @@ impl GamesScreen {
         Rect::new(x, content.y + (BTN_ROW_H - h).max(0.0) / 2.0, w, h.max(BTN_ROW_H))
     }
 
-    /// The five stat cards: total, wins, losses, draws, win rate.
+    /// The three stat cards, in the JS's order: win rate, wins, losses.
     fn stat_rects(&self, content: Rect) -> Vec<Rect> {
-        let (cols, col_w) = super::grid_columns(content.w, 150.0, 220.0, STAT_GAP);
-        (0..5)
+        let (cols, col_w) = super::grid_columns(content.w, 170.0, 280.0, STAT_GAP);
+        (0..3)
             .map(|i| {
                 let (row, col) = (i / cols, i % cols);
                 Rect::new(
@@ -197,24 +199,36 @@ impl GamesScreen {
             .collect()
     }
 
-    /// Y of the "DESTAQUES" group label.
+    /// Row-wise Y position a chip row needs — highlights are inline chips
+    /// that wrap; this returns the height consumed for `n` chips.
+    fn chips_height(&self, content: Rect, n: usize) -> f32 {
+        if n == 0 {
+            return 0.0;
+        }
+        const CHIP_W: f32 = 130.0;
+        const CHIP_ROW_H: f32 = 30.0;
+        let per_row = ((content.w / (CHIP_W + 8.0)).floor() as usize).max(1);
+        n.div_ceil(per_row) as f32 * CHIP_ROW_H
+    }
+
+    /// Y of the "Destaques" group label.
     fn highlights_y(&self, content: Rect) -> f32 {
         content.y + BTN_ROW_H + 12.0 + STAT_H + 30.0
     }
 
-    /// Y of the first highlight row.
+    /// Y where the highlight chip rows start.
     fn highlight_rows_y(&self, content: Rect) -> f32 {
         self.highlights_y(content) + 26.0
     }
 
-    /// Y of the "HISTÓRICO" group label.
+    /// Y of the "Histórico" group label.
     fn history_y(&self, content: Rect) -> f32 {
-        let count = self
+        let n = self
             .stats
             .as_ref()
             .map(|s| s.top_highlight_cards.len().min(10))
             .unwrap_or(0);
-        self.highlight_rows_y(content) + count as f32 * (HIGHLIGHT_ROW_H + 2.0) + 24.0
+        self.highlight_rows_y(content) + self.chips_height(content, n) + 24.0
     }
 
     fn row_rects(&self, content: Rect) -> Vec<Rect> {
@@ -297,17 +311,19 @@ impl GamesScreen {
             return;
         };
 
-        // Stat cards.
+        // Stat cards, the JS's three: win rate, wins, losses.
         let win_rate = stats
             .win_rate
             .map(|r| format!("{r:.1}%"))
             .unwrap_or_else(|| "—".into());
-        let card_data: [(&str, String, &str); 5] = [
-            ("PARTIDAS", format!("{}", stats.total_games), "no total"),
-            ("VITÓRIAS", format!("{}", stats.wins), "vitoria"),
-            ("DERROTAS", format!("{}", stats.losses), "derrota"),
-            ("EMPATES", format!("{}", stats.draws), "empate"),
-            ("WIN RATE", win_rate, "das partidas"),
+        let card_data: [(&str, String, String); 3] = [
+            (
+                "TAXA DE VITÓRIA",
+                win_rate,
+                format!("{} partidas", stats.total_games),
+            ),
+            ("VITÓRIAS", format!("{}", stats.wins), String::new()),
+            ("DERROTAS", format!("{}", stats.losses), String::new()),
         ];
         for (i, rect) in self.stat_rects(content).iter().enumerate() {
             let (label, value, sub) = &card_data[i];
@@ -321,6 +337,11 @@ impl GamesScreen {
                 rect.y + 14.0,
                 theme.glass.text_placeholder.0,
             );
+            let value_color = match i {
+                1 => theme.colors.success.0,
+                2 => theme.colors.danger.0,
+                _ => theme.colors.text.0,
+            };
             text(
                 c,
                 value,
@@ -328,25 +349,27 @@ impl GamesScreen {
                 600,
                 rect.x + 14.0,
                 rect.y + 30.0,
-                theme.colors.text.0,
+                value_color,
             );
-            text(
-                c,
-                sub,
-                11.0,
-                400,
-                rect.x + 14.0,
-                rect.y + 68.0,
-                theme.colors.text_dim.0,
-            );
+            if !sub.is_empty() {
+                text(
+                    c,
+                    sub,
+                    11.0,
+                    400,
+                    rect.x + 14.0,
+                    rect.y + 68.0,
+                    theme.colors.text_dim.0,
+                );
+            }
         }
 
-        // Highlights.
-        group_label(c, "DESTAQUES", content.x, self.highlights_y(content), theme);
+        // Highlights: inline chips ("Nome · Nx"), like the JS.
+        group_label(c, "CARTAS QUE MAIS SE DESTACARAM", content.x, self.highlights_y(content), theme);
         if stats.top_highlight_cards.is_empty() {
             text(
                 c,
-                "Nenhum destaque ainda — registre partidas com cartas marcadas.",
+                "Nenhum destaque registrado ainda.",
                 12.0,
                 400,
                 content.x,
@@ -354,42 +377,34 @@ impl GamesScreen {
                 theme.colors.text_dim.0,
             );
         } else {
-            for (i, hl) in stats.top_highlight_cards.iter().take(10).enumerate() {
-                let rect = Rect::new(
-                    content.x,
-                    self.highlight_rows_y(content) + i as f32 * (HIGHLIGHT_ROW_H + 2.0),
-                    content.w,
-                    HIGHLIGHT_ROW_H,
-                );
-                let rank = format!("{}", i + 1);
-                text(
-                    c,
-                    &rank,
-                    11.0,
-                    600,
-                    rect.x,
-                    rect.y + 6.0,
-                    theme.glass.text_placeholder.0,
-                );
-                text(
-                    c,
-                    &hl.card_name,
+            let mut hx = content.x;
+            let mut hy = self.highlight_rows_y(content);
+            for hl in stats.top_highlight_cards.iter().take(10) {
+                let label = format!("{} · {}x", hl.card_name, hl.n);
+                let cw = label.len() as f32 * 6.4 + 20.0;
+                if hx + cw > content.x + content.w {
+                    hx = content.x;
+                    hy += HIGHLIGHT_ROW_H + 6.0;
+                }
+                c.push(rounded_rect(
+                    hx,
+                    hy,
+                    cw,
+                    24.0,
                     12.0,
-                    500,
-                    rect.x + 30.0,
-                    rect.y + 5.0,
-                    theme.colors.text.0,
-                );
-                let n = format!("{} partida(s)", hl.n);
-                text(
-                    c,
-                    &n,
-                    11.0,
-                    400,
-                    rect.x + rect.w - n.len() as f32 * 6.2,
-                    rect.y + 6.0,
-                    theme.colors.text_dim.0,
-                );
+                    theme.glass.surface_active.0,
+                ));
+                c.push(rounded_rect_stroke(
+                    hx,
+                    hy,
+                    cw,
+                    24.0,
+                    12.0,
+                    theme.glass.edge_soft.0,
+                    1.0,
+                ));
+                text(c, &label, 11.0, 500, hx + 10.0, hy + 6.0, theme.colors.text.0);
+                hx += cw + 8.0;
             }
         }
 
@@ -473,27 +488,28 @@ impl GamesScreen {
             );
         }
 
-        // Highlights, right-aligned column.
+        // Highlights inline after the deck info.
         if !game.highlights.is_empty() {
             let joined = game.highlights.join(", ");
             text(
                 c,
-                "Destaques:",
+                &joined,
                 10.0,
-                600,
+                400,
                 rect.x + rect.w * 0.55,
                 rect.y + 12.0,
                 theme.glass.text_placeholder.0,
             );
-            text(
-                c,
-                &joined,
-                11.0,
-                400,
-                rect.x + rect.w * 0.55,
-                rect.y + 28.0,
-                theme.colors.text_dim.0,
-            );
+        }
+
+        // Notes, second row under deck/opponents.
+        if let Some(notes) = game.notes.as_deref().filter(|n| !n.is_empty()) {
+            let ny = if rect.h > 56.0 && game.turns.is_some() {
+                rect.y + 54.0
+            } else {
+                rect.y + 50.0
+            };
+            text(c, notes, 11.0, 400, rect.x + pill_w + 24.0, ny, theme.glass.text_placeholder.0);
         }
 
         // Timestamp, top-right.
