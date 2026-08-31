@@ -1,26 +1,14 @@
 //! Generic filter component for Collection, Decks, and Wishlist screens.
 //!
 //! Port of `desktop/ui/js/ui/card-filters.js`. Provides a unified filter
-//! toolbar with dropdowns for status, color, type, rarity, set, and a
-//! text search field. The filter state is serializable for URL routing.
+//! toolbar using single-select dropdowns and removable chips for active filters.
 
 use engine::compositor::Compositor;
-use engine::theme::Theme;
-use engine::ui::widgets::{Button, ButtonVariant, Chip, Dropdown, DropdownItem, EventResult, Rect, WidgetEvent};
+use engine::theme::{Intent, Theme};
+use engine::ui::widgets::{Button, ButtonVariant, Chip, EventResult, Rect, Select, WidgetEvent};
 
 use super::{EditKey, LabeledField, SearchField};
-use super::super::text;
-
-/// Filter categories shared across screens.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum FilterCategory {
-    Status,
-    Color,
-    Type,
-    Rarity,
-    Set,
-    Search,
-}
+use crate::view::text;
 
 /// Serializable filter state for persistence and URL routing.
 #[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -73,87 +61,100 @@ pub mod options {
     pub const RARITIES: &[&str] = &["Common", "Uncommon", "Rare", "Mythic"];
 }
 
-/// A single filter dropdown with multi-select chips.
-pub struct FilterDropdown {
+/// A filter category with single-select dropdown + active chips.
+struct FilterCategory {
     label: &'static str,
-    items: Vec<DropdownItem>,
+    select: Select,
+    options: Vec<String>,
     selected: Vec<usize>,
-    dropdown: Dropdown,
     rect: Rect,
-    open: bool,
 }
 
-impl FilterDropdown {
+impl FilterCategory {
     pub fn new(label: &'static str, options: &[&str]) -> Self {
-        let items = options.iter().map(|s| DropdownItem::new(*s)).collect();
+        let opts: Vec<String> = options.iter().map(|s| s.to_string()).collect();
         Self {
             label,
-            items,
+            select: Select::new(options.iter().copied(), 0),
+            options: opts,
             selected: Vec::new(),
-            dropdown: Dropdown::new(),
             rect: Rect::ZERO,
-            open: false,
         }
     }
 
+    pub fn set_options(&mut self, options: Vec<String>) {
+        self.options = options;
+        self.select = Select::new(self.options.iter().cloned(), 0);
+        self.selected.clear();
+    }
+
     pub fn selected_labels(&self) -> Vec<String> {
-        self.selected.iter().map(|&i| self.items[i].label.clone()).collect()
+        self.selected.iter().filter_map(|&i| self.options.get(i).cloned()).collect()
     }
 
     pub fn set_selected(&mut self, labels: &[String]) {
         self.selected.clear();
-        for (i, item) in self.items.iter().enumerate() {
-            if labels.contains(&item.label) {
+        for (i, opt) in self.options.iter().enumerate() {
+            if labels.contains(opt) {
                 self.selected.push(i);
             }
         }
     }
 
     pub fn is_open(&self) -> bool {
-        self.open
+        self.select.is_open()
     }
 
     pub fn handle_event(&mut self, event: &WidgetEvent, layout_rect: Rect) -> EventResult {
         self.rect = layout_rect;
-        let result = self.dropdown.handle_event(event, layout_rect.x, layout_rect.y, layout_rect.w, layout_rect.h);
-        if let Some(selected_idx) = self.dropdown.take_selected() {
-            if self.selected.contains(&selected_idx) {
-                self.selected.retain(|&i| i != selected_idx);
+        let result = self.select.handle_event(event, layout_rect.x, layout_rect.y, layout_rect.w, layout_rect.h);
+        if self.select.is_open() == false && result.changed() {
+            // Selection changed - toggle multi-select
+            let sel = self.select.selected;
+            if self.selected.contains(&sel) {
+                self.selected.retain(|&i| i != sel);
             } else {
-                self.selected.push(selected_idx);
+                self.selected.push(sel);
             }
-            self.open = true;
+            self.select.close();
             return EventResult::changed();
         }
         result
     }
 
     pub fn render(&self, c: &mut Compositor, theme: &Theme, block: Rect) {
-        self.dropdown.render(c, block.x, block.y, block.w, block.h, theme);
-        // Render selected chips below the dropdown
+        // Render select dropdown
+        self.select.render(c, theme, block.x, block.y, block.w, block.h);
+        // Render active chips below
         let mut y = block.y + block.h + 4.0;
-        for idx in &self.selected {
-            let label = &self.items[*idx].label;
-            let chip = Chip::new(label).removable(true);
-            let chip_w = chip.width(theme);
-            chip.render(c, block.x, y, theme);
-            y += 28.0;
+        for &idx in &self.selected {
+            if let Some(label) = self.options.get(idx) {
+                let chip = Chip::new(label).selected(true).interactive(true).intent(Intent::Constructive);
+                let chip_w = chip.width(theme);
+                chip.render(c, block.x, y, theme);
+                y += 28.0;
+            }
         }
+    }
+
+    pub fn clear_selection(&mut self) {
+        self.selected.clear();
+        self.select.selected = 0;
+        self.select.close();
     }
 }
 
 /// Complete filter toolbar for a screen.
 pub struct FilterBar {
     pub state: FilterState,
-    status: FilterDropdown,
-    color: FilterDropdown,
-    type_: FilterDropdown,
-    rarity: FilterDropdown,
-    set: FilterDropdown,
+    status: FilterCategory,
+    color: FilterCategory,
+    type_: FilterCategory,
+    rarity: FilterCategory,
+    set: FilterCategory,
     search: SearchField,
-    /// Layout rects for each dropdown (computed in layout pass).
+    clear_btn: Button,
     layout: FilterLayout,
-    /// Callback when filter changes.
     on_change: Option<Box<dyn Fn(&FilterState) + Send + Sync>>,
 }
 
@@ -166,51 +167,30 @@ struct FilterLayout {
     set: Rect,
     search: Rect,
     clear: Rect,
-    total_height: f32,
 }
 
 impl FilterBar {
-    /// Label shown on the clear-all button.
     const CLEAR_LABEL: &'static str = "Limpar";
 
     pub fn new(theme: &Theme, on_change: impl Fn(&FilterState) + Send + Sync + 'static) -> Self {
-        let status = FilterDropdown::new("Status", options::STATUSES);
-        let color = FilterDropdown::new("Cor", options::COLORS);
-        let type_ = FilterDropdown::new("Tipo", options::TYPES);
-        let rarity = FilterDropdown::new("Raridade", options::RARITIES);
-        let set = FilterDropdown::new("Edição", &[]); // populated dynamically
-        let search = SearchField::new_without_callback("Buscar...", theme);
-
         Self {
             state: FilterState::default(),
-            status,
-            color,
-            type_,
-            rarity,
-            set,
-            search,
+            status: FilterCategory::new("Status", options::STATUSES),
+            color: FilterCategory::new("Cor", options::COLORS),
+            type_: FilterCategory::new("Tipo", options::TYPES),
+            rarity: FilterCategory::new("Raridade", options::RARITIES),
+            set: FilterCategory::new("Edição", &[]),
+            search: SearchField::new_without_callback("Buscar...", theme),
+            clear_btn: Button::new(Self::CLEAR_LABEL).variant(ButtonVariant::Ghost),
             layout: FilterLayout::default(),
             on_change: Some(Box::new(on_change)),
         }
     }
 
-    /// Update set options from the card index (called on mount/refresh).
     pub fn set_set_options(&mut self, sets: Vec<String>) {
-        self.set.items = sets.into_iter().map(DropdownItem::new).collect();
+        self.set.set_options(sets);
     }
 
-    /// Total height needed for the filter bar (depends on open dropdowns/chips).
-    pub fn height(&self, content_width: f32) -> f32 {
-        let mut h = 44.0; // base row
-        for d in [&self.status, &self.color, &self.type_, &self.rarity, &self.set] {
-            if d.is_open() || !d.selected.is_empty() {
-                h += 28.0 * (d.selected.len() + 1) as f32;
-            }
-        }
-        h
-    }
-
-    /// Compute layout rects for a given content rect.
     pub fn layout(&mut self, content: Rect) {
         const GAP: f32 = 12.0;
         const DROPDOWN_W: f32 = 140.0;
@@ -240,42 +220,40 @@ impl FilterBar {
         x += SEARCH_W + GAP;
 
         self.layout.clear = Rect::new(x, y, CLEAR_W, ROW_H);
-
-        self.layout.total_height = ROW_H;
     }
 
     pub fn handle_event(&mut self, event: &WidgetEvent, content: Rect) -> EventResult {
         self.layout(content);
         let mut changed = false;
 
-        // Handle dropdowns
-        for (dropdown, layout) in [
+        for (cat, layout) in [
             (&mut self.status, self.layout.status),
             (&mut self.color, self.layout.color),
             (&mut self.type_, self.layout.type_),
             (&mut self.rarity, self.layout.rarity),
             (&mut self.set, self.layout.set),
         ] {
-            let result = dropdown.handle_event(event, layout);
+            let result = cat.handle_event(event, layout);
             if result.changed() {
                 changed = true;
             }
         }
 
-        // Handle search field
-        if let Some(search_layout) = Some(self.layout.search) {
-            // Note: SearchField needs its own event handling
+        // Search field
+        if self.search.value() != self.state.search {
+            self.state.search = self.search.value().to_string();
+            changed = true;
         }
 
-        // Handle clear all button
+        // Clear all button
         if let WidgetEvent::MouseUp { x, y } = *event {
-            if self.layout.clear.contains(x, y) {
+            if self.layout.clear.contains(x, y) && !self.state.is_empty() {
                 self.state.clear();
-                self.status.selected.clear();
-                self.color.selected.clear();
-                self.type_.selected.clear();
-                self.rarity.selected.clear();
-                self.set.selected.clear();
+                self.status.clear_selection();
+                self.color.clear_selection();
+                self.type_.clear_selection();
+                self.rarity.clear_selection();
+                self.set.clear_selection();
                 self.search.set_value("");
                 changed = true;
             }
@@ -302,44 +280,35 @@ impl FilterBar {
     }
 
     pub fn render(&self, c: &mut Compositor, theme: &Theme, content: Rect) {
-        // Render dropdowns
-        for (dropdown, layout) in [
+        for (cat, layout) in [
             (&self.status, self.layout.status),
             (&self.color, self.layout.color),
             (&self.type_, self.layout.type_),
             (&self.rarity, self.layout.rarity),
             (&self.set, self.layout.set),
         ] {
-            dropdown.render(c, theme, layout);
+            cat.render(c, theme, layout);
         }
 
-        // Render search field
         self.search.render(c, self.layout.search, theme);
 
-        // Render clear button
         if self.state.active_count() > 0 {
-            let btn = Button::new(Self::CLEAR_LABEL)
-                .variant(ButtonVariant::Ghost)
-                .size(CLEAR_W, 36.0);
-            btn.render(c, self.layout.clear.x, self.layout.clear.y, theme);
+            self.clear_btn.render(c, self.layout.clear, theme);
         }
 
-        // Active filter chips count badge
         if self.state.active_count() > 0 {
-            let count = self.state.active_count();
             text(
                 c,
-                &format!("{} filtro(s) ativo(s)", count),
+                &format!("{} filtro(s) ativo(s)", self.state.active_count()),
                 12.0,
                 500,
                 content.x,
-                content.y + self.layout.total_height + 4.0,
+                content.y + 52.0,
                 theme.colors.text_dim.0,
             );
         }
     }
 
-    /// Apply filter state from URL/serialized form.
     pub fn apply_state(&mut self, state: FilterState) {
         self.state = state.clone();
         self.status.set_selected(&state.status);
