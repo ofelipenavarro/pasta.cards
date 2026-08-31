@@ -31,6 +31,7 @@ pub mod card_modal;
 pub mod delete_deck;
 pub mod edit_deck;
 pub mod field;
+pub mod filter;
 pub mod import_deck;
 pub mod modal;
 pub mod new_deck;
@@ -38,3 +39,4 @@ pub mod search_field;
 pub mod set_picker;
 
 pub use field::LabeledField;
+pub use filter::{FilterBar, FilterState, FilterAnswer, options};
