@@ -260,6 +260,7 @@ impl ApplicationHandler<AppEvent> for App {
                 // modal; grid tiles draw smaller and downscale fine.
                 let rels = self.view.take_art_requests();
                 if !rels.is_empty() {
+                    log::warn!("requesting {} art images: {:?}", rels.len(), rels);
                     let max_edge = (640.0 * self.scale_factor).ceil().clamp(256.0, 1024.0) as u32;
                     self.data.send(Command::LoadArt { rels, max_edge });
                     // The answer lands as an event, which invalidates then.

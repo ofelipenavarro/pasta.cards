@@ -1,9 +1,7 @@
 //! How the deck's cards are organized: the port of `computeDeckGroups`
 //! and its helpers (sort, group-by mode, labels).
 
-
 use spellbook_core::ops::decks::DeckCard;
-
 
 /// The JS's colorGroupKey: single color letter, "M" for multicolor, "C" for colorless.
 pub(crate) fn color_group_key(c: &DeckCard) -> &'static str {
@@ -19,19 +17,6 @@ pub(crate) fn color_group_key(c: &DeckCard) -> &'static str {
             _ => "C",
         },
         _ => "M",
-    }
-}
-
-fn color_group_label(k: &str) -> String {
-    match k {
-        "W" => "Branco".to_string(),
-        "U" => "Azul".to_string(),
-        "B" => "Preto".to_string(),
-        "R" => "Vermelho".to_string(),
-        "G" => "Verde".to_string(),
-        "M" => "Multicolor".to_string(),
-        "C" => "Incolor".to_string(),
-        _ => k.to_string(),
     }
 }
 
@@ -63,5 +48,3 @@ pub(crate) fn category_label(cat: &str) -> &'static str {
         _ => "Outro",
     }
 }
-
-

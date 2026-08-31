@@ -23,14 +23,6 @@ pub(crate) fn content_to_window(content: Rect) -> Rect {
     )
 }
 
-/// Recover the content rect from a window rect (the shell passes the whole
-/// window for overlay events): inset by nothing, height shrunk to the
-/// content area. Both helpers exist so the two paths agree on confirm
-/// button placement.
-pub(crate) fn window_to_content(window: Rect) -> Rect {
-    window
-}
-
 /// The Confirmar / Cancelar buttons of both dialogs, centred at the bottom
 /// of the window band.
 pub(crate) fn confirm_buttons(window: Rect) -> (Rect, Rect) {

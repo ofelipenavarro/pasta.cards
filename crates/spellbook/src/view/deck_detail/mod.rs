@@ -31,8 +31,6 @@ use super::components::filters::{card_category, matches_filters, FilterBar, Filt
 use super::components::import_deck::{ImportDeckAnswer, ImportDeckModal};
 use super::components::search_field::SearchField;
 
-pub const SIDEBAR_W: f32 = 248.0;
-
 const CURVE_COLORS: [(&str, u32); 7] = [
     ("W", 0xefe6bb),
     ("U", 0x6aa9f0),
@@ -182,12 +180,6 @@ impl<'a> FilterCard for DeckCardRef<'a> {
     }
 }
 
-/// What the pointer is over. Layout functions provide the rects.
-#[derive(Clone, Debug)]
-enum Hit {
-    Nothing,
-}
-
 pub struct DeckDetailScreen {
     deck: Option<Box<DeckDetail>>,
     deck_id: Option<i64>,
@@ -217,7 +209,6 @@ pub struct DeckDetailScreen {
     /// Card name pending a second-copy confirmation (the 409 dance).
     add_confirm: Option<(String, Option<String>)>,
 
-    missing_open: bool,
     /// Which format the user clicked; the `DeckExported` answer belongs to it.
     export_format: Option<String>,
     /// Export dropdown state (Moxfield / plain text).
@@ -293,11 +284,10 @@ impl DeckDetailScreen {
             import_deck_modal: ImportDeckModal::new(theme),
             remove_confirm: None,
             add_confirm: None,
-            missing_open: false,
+            header_rects: HeaderRects::default(),
             export_format: None,
             export_menu_open: false,
             sort_menu_open: false,
-            header_rects: HeaderRects::default(),
             tx: None,
             add_search_dirty: false,
             add_search_debounce: 0.0,
@@ -320,14 +310,6 @@ impl DeckDetailScreen {
         ctx.send(Command::DeckTags {
             deck_id: id,
         });
-    }
-
-    fn reload(&self) {
-        if let Some(id) = self.deck_id
-            && let Some(tx) = &self.tx
-        {
-            let _ = tx.send(Command::GetDeck { deck_id: id });
-        }
     }
 
     pub fn on_event(&mut self, event: &Event, ctx: &mut ScreenCtx) -> bool {
@@ -568,10 +550,6 @@ impl DeckDetailScreen {
                 out
             }
         }
-    }
-
-    fn group_label(&'static self, key: &str) -> String {
-        key.to_string()
     }
 
     pub fn handle_event(&mut self, event: &WidgetEvent, content: Rect, ctx: &mut ScreenCtx) -> EventResult {

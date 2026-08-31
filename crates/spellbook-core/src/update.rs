@@ -618,7 +618,7 @@ fn cache_images(on_progress: &mut dyn FnMut(usize, usize, u64)) -> Result<(u64, 
     Ok((fetched, failed))
 }
 
-fn fetch_image(agent: &ureq::Agent, url: &str, dest: &std::path::Path) -> Result<u64, String> {
+pub fn fetch_image(agent: &ureq::Agent, url: &str, dest: &std::path::Path) -> Result<u64, String> {
     let resp = agent
         .get(url)
         .set("User-Agent", USER_AGENT)

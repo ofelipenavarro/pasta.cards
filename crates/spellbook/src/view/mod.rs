@@ -391,6 +391,7 @@ impl SpellbookView {
     pub fn handle_data(&mut self, event: &Event) -> bool {
         // Art resolves into the cache, not into a screen.
         if let Event::ArtLoaded { images } = event {
+            log::warn!("art loaded: {} images", images.len());
             let mut changed = false;
             for (rel, art) in images {
                 changed |= self.art.resolve(

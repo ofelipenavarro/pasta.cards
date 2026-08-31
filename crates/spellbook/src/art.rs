@@ -38,9 +38,9 @@ enum State {
     /// Asked for, not answered yet.
     Pending,
     Ready(ImageHandle),
-    /// Not on disk, or the bytes would not decode. Asked for once, never again
-    /// this session.
-    Missing,
+    /// Not on disk, or the bytes would not decode. Retried a few times before
+    /// being treated as a real miss — the worker can fetch from Scryfall now.
+    Missing(u8),
 }
 
 #[derive(Default)]
@@ -61,7 +61,14 @@ impl ArtCache {
     pub fn get(&mut self, rel: &str) -> Option<ImageHandle> {
         match self.entries.get(rel) {
             Some(State::Ready(h)) => Some(*h),
-            Some(State::Pending | State::Missing) => None,
+            Some(State::Pending) => None,
+            Some(State::Missing(tries)) => {
+                // Retry a few times: the worker may fetch from Scryfall now.
+                if *tries < 3 {
+                    self.wanted.push(rel.to_string());
+                }
+                None
+            }
             None => {
                 self.entries.insert(rel.to_string(), State::Pending);
                 self.wanted.push(rel.to_string());
@@ -87,10 +94,17 @@ impl ArtCache {
                     // a miss so the tile draws its placeholder rather than the
                     // frame failing.
                     log::warn!("card art {rel} did not fit the atlas: {e}");
-                    State::Missing
+                    State::Missing(0)
                 }
             },
-            None => State::Missing,
+            None => {
+                let tries = match self.entries.get(rel) {
+                    Some(State::Missing(t)) => *t + 1,
+                    Some(State::Pending) => 1,
+                    _ => 1,
+                };
+                State::Missing(tries)
+            }
         };
         let ready = matches!(state, State::Ready(_));
         self.entries.insert(rel.to_string(), state);
@@ -100,7 +114,7 @@ impl ArtCache {
     /// Forget a miss so it is retried - after a data update has filled the
     /// cache, the art that was missing all session is now there.
     pub fn retry_missing(&mut self) {
-        self.entries.retain(|_, s| !matches!(s, State::Missing));
+        self.entries.retain(|_, s| !matches!(s, State::Missing(_)));
     }
 }
 
@@ -121,20 +135,32 @@ mod tests {
         assert!(cache.take_requests().is_empty());
     }
 
-    /// A miss is remembered. Without this the cache would re-ask for every
+    /// A miss is retried a few times (the worker may fetch from Scryfall),
+    /// then remembered. Without this the cache would re-ask for every
     /// uncached card sixty times a second, which on a fresh install is most
     /// of the collection.
     #[test]
-    fn a_missing_image_is_not_asked_for_again() {
+    fn a_missing_image_is_retried_then_remembered() {
         let mut cache = ArtCache::new();
         cache.get("art_crop/front/a/4/x.jpg");
         cache.take_requests();
         assert!(!cache.resolve("art_crop/front/a/4/x.jpg", None));
 
+        // First failure: retried once.
+        assert!(cache.get("art_crop/front/a/4/x.jpg").is_none());
+        assert_eq!(cache.take_requests(), vec!["art_crop/front/a/4/x.jpg"]);
+
+        // Second failure: still retried.
+        assert!(!cache.resolve("art_crop/front/a/4/x.jpg", None));
+        assert!(cache.get("art_crop/front/a/4/x.jpg").is_none());
+        assert_eq!(cache.take_requests(), vec!["art_crop/front/a/4/x.jpg"]);
+
+        // Third failure: now it is a real miss.
+        assert!(!cache.resolve("art_crop/front/a/4/x.jpg", None));
         assert!(cache.get("art_crop/front/a/4/x.jpg").is_none());
         assert!(
             cache.take_requests().is_empty(),
-            "a known miss must not be re-requested"
+            "after three misses it must stop asking"
         );
     }
 

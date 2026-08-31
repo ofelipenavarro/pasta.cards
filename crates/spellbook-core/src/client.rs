@@ -456,6 +456,16 @@ fn run(command: Command, on_event: &(impl Fn(Event) + ?Sized)) {
             let images = rels
                 .into_iter()
                 .map(|rel| {
+                    // If the file is not in the cache yet, fetch it from
+                    // Scryfall now so the next frame draws the real art.
+                    let path = crate::images::cached_file(&rel);
+                    if !path.exists() {
+                        let url = format!("{}{}", crate::images::HOST, rel);
+                        let agent = ureq::Agent::new();
+                        if let Err(e) = crate::update::fetch_image(&agent, &url, &path) {
+                            log::warn!("card art fetch failed for {rel}: {e}");
+                        }
+                    }
                     let art =
                         crate::images::load_scaled(&rel, max_edge).map(|(w, h, pixels)| ArtImage {
                             width: w,
