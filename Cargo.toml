@@ -23,6 +23,7 @@ rusqlite = { version = "0.31", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 dirs = "5"
+nest = { path = "crates/nest" }
 ureq = { version = "2", default-features = false, features = ["tls", "gzip"] }
 flate2 = "1"
 # Decodes cached card art on the worker thread. jpeg covers Scryfall; png covers

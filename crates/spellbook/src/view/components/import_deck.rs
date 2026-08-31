@@ -48,6 +48,7 @@ pub struct ImportDeckModal {
 
     error: Option<String>,
     focus: bool,
+    open: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -85,6 +86,7 @@ impl ImportDeckModal {
             cancel_btn: Button::new("Cancelar").variant(ButtonVariant::Outline),
             error: None,
             focus: false,
+            open: false,
         }
     }
 
@@ -99,6 +101,19 @@ impl ImportDeckModal {
         self.error = None;
         self.focus = true;
         self.list.focus();
+        self.open = true;
+    }
+
+    pub fn is_open(&self) -> bool {
+        self.open
+    }
+
+    pub fn close(&mut self) {
+        self.open = false;
+        self.deck_id = None;
+        self.preview = None;
+        self.focus = false;
+        self.list.unfocus();
     }
 
     fn reset_preview(&mut self) {
@@ -580,9 +595,9 @@ mod tests {
                 name: "Sol Ring".into(),
                 quantity: 1,
                 requested_name: "Sol Ring".into(),
-                match_type: "exata".into(),
+                match_type: spellbook_core::ops::cards::MatchKind::Exact,
                 mana_cost: None,
-                type_line: "Artifact".into(),
+                type_line: Some("Artifact".to_string()),
                 image: None,
                 image_back: None,
             }],
@@ -613,9 +628,9 @@ mod tests {
                 name: "Sol Ring".into(),
                 quantity: 2,
                 requested_name: "Sol Ring".into(),
-                match_type: "exata".into(),
+                match_type: spellbook_core::ops::cards::MatchKind::Exact,
                 mana_cost: None,
-                type_line: "Artifact".into(),
+                type_line: Some("Artifact".to_string()),
                 image: None,
                 image_back: None,
             }],

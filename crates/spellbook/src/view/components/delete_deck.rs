@@ -47,6 +47,7 @@ pub struct DeleteDeckModal {
     cancel: Button,
 
     error: Option<String>,
+    open: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -61,7 +62,7 @@ struct Layout {
 }
 
 impl DeleteDeckModal {
-    pub fn new(theme: &Theme) -> Self {
+    pub fn new(_theme: &Theme) -> Self {
         Self {
             frame: ModalFrame::new(),
             deck_id: None,
@@ -73,6 +74,7 @@ impl DeleteDeckModal {
             delete: Button::new("Excluir deck").intent(Intent::Destructive),
             cancel: Button::new("Cancelar").variant(ButtonVariant::Outline),
             error: None,
+            open: false,
         }
     }
 
@@ -85,6 +87,18 @@ impl DeleteDeckModal {
         self.free.checked = true;
         self.remove.checked = false;
         ctx.send(Command::GetDeck { deck_id: deck.id });
+        self.open = true;
+    }
+
+    pub fn is_open(&self) -> bool {
+        self.open
+    }
+
+    pub fn close(&mut self) {
+        self.open = false;
+        self.deck_id = None;
+        self.detail = None;
+        self.phase = Phase::Idle;
     }
 
     pub fn on_event(&mut self, event: &Event, _ctx: &mut ScreenCtx) -> bool {

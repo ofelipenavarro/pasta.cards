@@ -18,6 +18,7 @@ use super::{
     EditKey, Route, ScreenCtx, deck_tile, grid_columns, group_label, text, with_alpha,
 };
 use crate::art::ArtCache;
+use crate::view::ScreenAction;
 use crate::view::components::delete_deck::{DeleteDeckAnswer, DeleteDeckModal};
 use crate::view::components::edit_deck::{EditDeckAnswer, EditDeckModal};
 use crate::view::components::import_deck::{ImportDeckAnswer, ImportDeckModal};
@@ -117,26 +118,26 @@ impl DecksScreen {
     }
 
     pub fn handle_text(&mut self, s: &str, _ctx: &mut ScreenCtx) -> bool {
-        if self.new_deck_modal.opened() {
+        if self.new_deck_modal.is_open() {
             return self.new_deck_modal.handle_text(s);
         }
-        if self.edit_deck_modal.opened() {
+        if self.edit_deck_modal.is_open() {
             return self.edit_deck_modal.handle_text(s);
         }
-        if self.import_deck_modal.opened() {
+        if self.import_deck_modal.is_open() {
             return self.import_deck_modal.handle_text(s);
         }
         false
     }
 
     pub fn handle_edit_key(&mut self, key: EditKey, ctx: &mut ScreenCtx) -> bool {
-        if self.new_deck_modal.opened() {
+        if self.new_deck_modal.is_open() {
             return self.new_deck_modal.handle_edit_key(key, ctx).changed;
         }
-        if self.edit_deck_modal.opened() {
+        if self.edit_deck_modal.is_open() {
             return self.edit_deck_modal.handle_edit_key(key, ctx).changed;
         }
-        if self.import_deck_modal.opened() {
+        if self.import_deck_modal.is_open() {
             return self.import_deck_modal.handle_edit_key(key, ctx).changed;
         }
         false
@@ -146,28 +147,28 @@ impl DecksScreen {
         if self.context_menu.take().is_some() {
             return true;
         }
-        if self.new_deck_modal.opened() {
+        if self.new_deck_modal.is_open() {
             if self.new_deck_modal.handle_escape() {
                 return true;
             }
             self.new_deck_modal.close();
             return true;
         }
-        if self.edit_deck_modal.opened() {
+        if self.edit_deck_modal.is_open() {
             if self.edit_deck_modal.handle_escape() {
                 return true;
             }
             self.edit_deck_modal.close();
             return true;
         }
-        if self.delete_deck_modal.opened() {
+        if self.delete_deck_modal.is_open() {
             if self.delete_deck_modal.handle_escape() {
                 return true;
             }
             self.delete_deck_modal.close();
             return true;
         }
-        if self.import_deck_modal.opened() {
+        if self.import_deck_modal.is_open() {
             if self.import_deck_modal.handle_escape() {
                 return true;
             }
@@ -182,13 +183,13 @@ impl DecksScreen {
         if let Some(tx) = &self.tx {
             let mut dummy_actions = Vec::new();
             let mut ctx = ScreenCtx { tx, actions: &mut dummy_actions };
-            if self.new_deck_modal.opened() {
+            if self.new_deck_modal.is_open() {
                 animating |= self.new_deck_modal.tick(dt, &mut ctx);
             }
-            if self.edit_deck_modal.opened() {
+            if self.edit_deck_modal.is_open() {
                 animating |= self.edit_deck_modal.tick(dt, &mut ctx);
             }
-            if self.import_deck_modal.opened() {
+            if self.import_deck_modal.is_open() {
                 animating |= self.import_deck_modal.tick(dt, &mut ctx);
             }
         }
@@ -199,10 +200,10 @@ impl DecksScreen {
 
     pub fn overlay_open(&self) -> bool {
         self.context_menu.is_some()
-            || self.new_deck_modal.opened()
-            || self.edit_deck_modal.opened()
-            || self.delete_deck_modal.opened()
-            || self.import_deck_modal.opened()
+            || self.new_deck_modal.is_open()
+            || self.edit_deck_modal.is_open()
+            || self.delete_deck_modal.is_open()
+            || self.import_deck_modal.is_open()
     }
 
     pub fn handle_overlay_event(
@@ -241,7 +242,7 @@ impl DecksScreen {
             return result;
         }
 
-        if self.new_deck_modal.opened() {
+        if self.new_deck_modal.is_open() {
             let (answer, result) = self.new_deck_modal.handle_event(event, window, ctx);
             match answer {
                 Some(NewDeckAnswer::Created(id)) => {
@@ -255,7 +256,7 @@ impl DecksScreen {
             return result;
         }
 
-        if self.edit_deck_modal.opened() {
+        if self.edit_deck_modal.is_open() {
             let (answer, result) = self.edit_deck_modal.handle_event(event, window, ctx);
             match answer {
                 Some(EditDeckAnswer::Saved) => {
@@ -269,7 +270,7 @@ impl DecksScreen {
             return result;
         }
 
-        if self.delete_deck_modal.opened() {
+        if self.delete_deck_modal.is_open() {
             let (answer, result) = self.delete_deck_modal.handle_event(event, window, ctx);
             match answer {
                 Some(DeleteDeckAnswer::Deleted) => {
@@ -283,7 +284,7 @@ impl DecksScreen {
             return result;
         }
 
-        if self.import_deck_modal.opened() {
+        if self.import_deck_modal.is_open() {
             let (answer, result) = self.import_deck_modal.handle_event(event, window, ctx);
             match answer {
                 Some(ImportDeckAnswer::Imported) => {
@@ -312,13 +313,13 @@ impl DecksScreen {
             menu_state.menu.render(c, layer, theme, menu_state.origin.0, menu_state.origin.1);
         }
 
-        if self.new_deck_modal.opened() {
+        if self.new_deck_modal.is_open() {
             self.new_deck_modal.render(c, layer, window, theme);
-        } else if self.edit_deck_modal.opened() {
+        } else if self.edit_deck_modal.is_open() {
             self.edit_deck_modal.render(c, layer, window, theme);
-        } else if self.delete_deck_modal.opened() {
+        } else if self.delete_deck_modal.is_open() {
             self.delete_deck_modal.render(c, layer, window, theme);
-        } else if self.import_deck_modal.opened() {
+        } else if self.import_deck_modal.is_open() {
             self.import_deck_modal.render(c, layer, window, theme);
         }
 
@@ -549,56 +550,6 @@ impl DecksScreen {
         text(c, "⋯", 14.0, 700, r.x + 8.0, r.y + 6.0, theme.colors.text.0);
     }
 }
-
-// Helper methods used by the screen above. They are defined on the modals in
-// their own modules; these extension methods keep the screen code readable.
-mod modal_ext {
-    use super::*;
-
-    pub trait ModalState {
-        fn opened(&self) -> bool;
-        fn close(&mut self);
-    }
-
-    impl ModalState for NewDeckModal {
-        fn opened(&self) -> bool {
-            // The modal is open from `open()` until `close()` clears its focus.
-            self.is_open()
-        }
-        fn close(&mut self) {
-            self.close();
-        }
-    }
-
-    impl ModalState for EditDeckModal {
-        fn opened(&self) -> bool {
-            self.is_open()
-        }
-        fn close(&mut self) {
-            self.close();
-        }
-    }
-
-    impl ModalState for DeleteDeckModal {
-        fn opened(&self) -> bool {
-            self.is_open()
-        }
-        fn close(&mut self) {
-            self.close();
-        }
-    }
-
-    impl ModalState for ImportDeckModal {
-        fn opened(&self) -> bool {
-            self.is_open()
-        }
-        fn close(&mut self) {
-            self.close();
-        }
-    }
-}
-
-use modal_ext::ModalState;
 
 #[cfg(test)]
 mod tests {

@@ -328,14 +328,22 @@ impl NewDeckModal {
     pub fn on_event(&mut self, event: &Event, _ctx: &mut ScreenCtx) -> bool {
         match event {
             Event::CardsFound(cards) => {
-                let (suggestions, hover, in_flight) = self.active_suggestions_mut();
-                if !*in_flight {
-                    return false;
+                let slot2 = self.focus == Some(Slot::Commander2);
+                {
+                    let in_flight = if slot2 {
+                        &mut self.name2_in_flight
+                    } else {
+                        &mut self.name_in_flight
+                    };
+                    if !*in_flight {
+                        return false;
+                    }
+                    *in_flight = false;
                 }
-                *in_flight = false;
                 if !self.focused_field().is_some_and(|f| f.is_focused()) {
                     return false;
                 }
+                let (suggestions, hover, _) = self.active_suggestions_mut();
                 *suggestions = cards.iter().take(SUGGEST_ROWS).cloned().collect();
                 *hover = None;
                 true
@@ -350,8 +358,7 @@ impl NewDeckModal {
                             self.build_phase = BuildPhase::Building { deck_id: *id };
                             true
                         } else {
-                            // The screen will take the Created answer on the
-                            // next handle_event call and close the modal.
+                            self.created_id = Some(*id);
                             self.build_phase = BuildPhase::Idle;
                             true
                         }
@@ -413,8 +420,11 @@ impl NewDeckModal {
         }
     }
 
-    /// The id the auto-build finished with, if it is done.
+    /// The id to report to the screen, whether from a plain create or a finished auto-build.
     pub fn finished_deck_id(&self) -> Option<i64> {
+        if let Some(id) = self.created_id {
+            return Some(id);
+        }
         if let BuildPhase::Polling { deck_id } = self.build_phase {
             Some(deck_id)
         } else {
@@ -527,9 +537,9 @@ impl NewDeckModal {
                 if l.auto.contains(x, y) {
                     self.auto_build.checked = !self.auto_build.checked;
                     self.save.label = if self.auto_build.checked {
-                        "Montar deck"
+                        "Montar deck".to_string()
                     } else {
-                        "Criar deck"
+                        "Criar deck".to_string()
                     };
                     return (None, EventResult::clicked());
                 }
@@ -585,7 +595,7 @@ impl NewDeckModal {
             _ => return EventResult::IGNORED,
         };
         let suggest = self.suggest_rect(field_rect);
-        let (suggestions, hover) = self.active_suggestions();
+        let (suggestions, hover, _) = self.active_suggestions_mut();
 
         match *event {
             WidgetEvent::MouseMove { x, y } => {
@@ -606,10 +616,11 @@ impl NewDeckModal {
             {
                 let i = ((y - suggest.y - 4.0) / (SUGGEST_H + 4.0)).floor() as usize;
                 if let Some(card) = suggestions.get(i).cloned() {
-                    self.field_mut(slot).set_value(&card.name);
+                    let name = card.name.clone();
                     suggestions.clear();
+                    self.field_mut(slot).set_value(&name);
                     if slot == Slot::Commander && self.name.is_empty() {
-                        self.name.set_value(&card.name);
+                        self.name.set_value(&name);
                     }
                     return EventResult::clicked();
                 }

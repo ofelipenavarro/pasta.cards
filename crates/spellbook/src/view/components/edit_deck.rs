@@ -66,6 +66,7 @@ pub struct EditDeckModal {
 
     error: Option<String>,
     saving: bool,
+    open: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -111,6 +112,7 @@ impl EditDeckModal {
             hover_suggest2: None,
             error: None,
             saving: false,
+            open: false,
         }
     }
 
@@ -129,6 +131,19 @@ impl EditDeckModal {
             self.tags.set_value(t);
         }
         self.set_focus(Some(Slot::Commander), ctx);
+        self.open = true;
+    }
+
+    pub fn is_open(&self) -> bool {
+        self.open
+    }
+
+    pub fn close(&mut self) {
+        self.open = false;
+        self.deck_id = None;
+        self.focus = None;
+        self.suggestions.clear();
+        self.suggestions2.clear();
     }
 
     fn reset(&mut self) {
@@ -252,14 +267,22 @@ impl EditDeckModal {
     pub fn on_event(&mut self, event: &Event, _ctx: &mut ScreenCtx) -> bool {
         match event {
             Event::CardsFound(cards) => {
-                let (suggestions, hover, in_flight) = self.active_suggestions_mut();
-                if !*in_flight {
-                    return false;
+                let slot2 = self.focus == Some(Slot::Commander2);
+                {
+                    let in_flight = if slot2 {
+                        &mut self.name2_in_flight
+                    } else {
+                        &mut self.name_in_flight
+                    };
+                    if !*in_flight {
+                        return false;
+                    }
+                    *in_flight = false;
                 }
-                *in_flight = false;
                 if !self.focus.is_some_and(|s| self.field_ref(s).is_focused()) {
                     return false;
                 }
+                let (suggestions, hover, _) = self.active_suggestions_mut();
                 *suggestions = cards.iter().take(SUGGEST_ROWS).cloned().collect();
                 *hover = None;
                 true
@@ -396,7 +419,7 @@ impl EditDeckModal {
             _ => return EventResult::IGNORED,
         };
         let suggest = self.suggest_rect(field_rect);
-        let (suggestions, hover) = self.active_suggestions();
+        let (suggestions, hover, _) = self.active_suggestions_mut();
 
         match *event {
             WidgetEvent::MouseMove { x, y } => {
@@ -417,8 +440,9 @@ impl EditDeckModal {
             {
                 let i = ((y - suggest.y - 4.0) / (SUGGEST_H + 4.0)).floor() as usize;
                 if let Some(card) = suggestions.get(i).cloned() {
-                    self.field_mut(slot).set_value(&card.name);
+                    let name = card.name.clone();
                     suggestions.clear();
+                    self.field_mut(slot).set_value(&name);
                     return EventResult::clicked();
                 }
                 EventResult::IGNORED
