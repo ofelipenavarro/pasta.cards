@@ -24,9 +24,9 @@ cd
 | `#decks` | `views/decks.js` | `view/decks.rs` | ❌ Placeholder | Grid, modais novo/editar/excluir/importar |
 | `#deck/:id` | `views/deck-detail.js` | `view/decks.rs` (placeholder) | ❌ Placeholder | Detalhe, filtros, views, sinergia, curva |
 | `#collection` | `views/collection.js` | `view/collection.rs` | ❌ Placeholder | Grid, filtros, modal de adicionar/editar |
-| `#wishlist` | `views/wishlist.js` | `view/wishlist.rs` | ❌ Placeholder | Grid, filtros, ações comprar/remover |
+| `#wishlist` | `views/wishlist.js` | `view/wishlist.rs` | ✅ Funcional | Grid, busca, ações adquirir/remover, AddCardModal, CardModal |
 | `#scanner` | `views/scanner.js` | `view/scanner.rs` | ❌ Placeholder permanente | Apenas aviso "Em breve" |
-| `#games` | `views/games.js` | `view/games.rs` | ❌ Placeholder | Lista, estatísticas, modal registrar |
+| `#games` | `views/games.js` | `view/games.rs` | ✅ Funcional | Stats, destaques, histórico, modal Registrar Partida |
 
 ## 3. Mapeamento de componentes UI
 
@@ -124,10 +124,10 @@ cd
 
 | Gap | Impacto | Prioridade |
 |-----|---------|------------|
-| Telas `DecksScreen`, `CollectionScreen`, `WishlistScreen`, `GamesScreen` são placeholders | Apenas Home e modais funcionam | Alta |
+| Telas `DecksScreen`, `CollectionScreen` são placeholders | Wishlist e Games funcionam | Alta |
 | Sistema de filtros (`card-filters.js`) não existe | Coleção/Deck/Wishlist sem filtros | Alta |
 | Modal de Novo/Editar/Excluir/Importar deck não existe | CRUD de decks inoperante | Alta |
-| Modal de registrar partida não existe | Tela de partidas inoperante | Alta |
+| ~~Modal de registrar partida~~ → implementado (`components/add_game.rs`) | — | — |
 | `SearchField` tem erros de integração | Campo de busca não pode ser usado | Alta |
 | `ConfirmDialog` não é usado e tem bug em `take_result` | Diálogos de confirmação inoperantes | Média |
 | `AddCardModal` e `CardModal` não estão plugados em telas | Fluxo de adicionar/ver carta não acessível | Alta |
@@ -171,9 +171,10 @@ cd
   - Lista/grid/stack de cartas
 
 ### Fase 4 — Wishlist e Partidas
-- [ ] Implementar `WishlistScreen` com grid, filtros, ações
-- [ ] Implementar `GamesScreen` com estatísticas e histórico
-- [ ] Implementar modal Registrar Partida
+- [x] Implementar `WishlistScreen` com grid, busca, adquirir/remover (`view/wishlist.rs`)
+- [x] Integrar `AddCardModal` e `CardModal` na wishlist
+- [x] Implementar `GamesScreen` com estatísticas, destaques e histórico (`view/games.rs`)
+- [x] Implementar modal Registrar Partida (`components/add_game.rs`)
 
 ### Fase 5 — Polimento
 - [ ] Implementar painel de dados/updater na sidebar

@@ -400,6 +400,9 @@ mod tests {
         modal.phase = Phase::Confirming;
 
         modal.confirm(&mut ctx);
+        // Drain the GetDeck the open path queued; only the DeleteDeck
+        // belongs to confirm.
+        let _ = rx.try_recv();
         let cmd = rx.try_recv().expect("expected DeleteDeck");
         match cmd {
             Command::DeleteDeck { deck_id, mode } => {

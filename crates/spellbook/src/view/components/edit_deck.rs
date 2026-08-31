@@ -365,24 +365,21 @@ impl EditDeckModal {
             }
         }
 
-        match *event {
-            WidgetEvent::MouseDown { x, y } => {
-                for (slot, rect) in [
-                    (Slot::Commander, l.commander),
-                    (Slot::Commander2, l.commander2),
-                    (Slot::Name, l.name),
-                    (Slot::Philosophy, l.philosophy),
-                    (Slot::Tags, l.tags),
-                ] {
-                    let fr = self.field_mut(slot).field_rect(rect);
-                    if fr.contains(x, y) {
-                        self.set_focus(Some(slot), ctx);
-                        self.field_mut(slot).click(x - fr.x);
-                        return (None, EventResult::changed());
-                    }
+        if let WidgetEvent::MouseDown { x, y } = *event {
+            for (slot, rect) in [
+                (Slot::Commander, l.commander),
+                (Slot::Commander2, l.commander2),
+                (Slot::Name, l.name),
+                (Slot::Philosophy, l.philosophy),
+                (Slot::Tags, l.tags),
+            ] {
+                let fr = self.field_mut(slot).field_rect(rect);
+                if fr.contains(x, y) {
+                    self.set_focus(Some(slot), ctx);
+                    self.field_mut(slot).click(x - fr.x);
+                    return (None, EventResult::changed());
                 }
             }
-            _ => {}
         }
 
         let cancel_r = self.cancel.handle_event(event, l.cancel);
@@ -423,9 +420,7 @@ impl EditDeckModal {
 
         match *event {
             WidgetEvent::MouseMove { x, y } => {
-                let hovered = (!suggestions.is_empty())
-                    .then(|| suggest.contains(x, y))
-                    .unwrap_or(false)
+                let hovered = if !suggestions.is_empty() { suggest.contains(x, y) } else { false }
                     .then(|| ((y - suggest.y - 4.0) / (SUGGEST_H + 4.0)).floor() as usize)
                     .filter(|i| *i < suggestions.len());
                 if hovered != *hover {

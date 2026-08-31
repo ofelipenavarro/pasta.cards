@@ -15,7 +15,6 @@ The script:
 import os
 import sys
 import sqlite3
-import json
 import hashlib
 from pathlib import Path
 from dataclasses import dataclass, field
@@ -84,7 +83,7 @@ IMAGE_EMBEDDING_MODEL = "clip-ViT-B-32"    # 512-dim, multimodal (CLIP)
 EMBEDDING_DIM_TEXT = 384
 EMBEDDING_DIM_IMAGE = 512
 CHUNKER_VERSION = "1.0.0"
-MAX_IMAGES_TO_EMBED = 800  # limit for practical build time
+MAX_IMAGES_TO_EMBED = 200  # practical limit: embed 200 card images max
 
 
 def embed_texts(texts: List[str], model_name: str = TEXT_EMBEDDING_MODEL) -> List[List[float]]:
@@ -98,22 +97,26 @@ def embed_texts(texts: List[str], model_name: str = TEXT_EMBEDDING_MODEL) -> Lis
     return [list(v) for v in vectors]
 
 
-def embed_images_batch(image_paths: List[str], model_name: str = IMAGE_EMBEDDING_MODEL, max_to_embed: int = MAX_IMAGES_TO_EMBED) -> List[List[float]]:
-    """Embed a list of images using CLIP vision model.
+def embed_images_limited(image_paths: List[str], max_to_embed: int = MAX_IMAGES_TO_EMBED) -> tuple:
+    """Embed up to max_to_embed images using CLIP vision model.
 
-    Only embeds up to max_to_embed images for practical build times.
-    Returns L2-normalized 512-dim embeddings.
+    Returns:
+        (embeddings_list, valid_count) where embeddings_list has exactly max_to_embed entries
+        (last entries are zero-padding if fewer images provided), and valid_count is how many
+        were actually successfully embedded.
     """
     from sentence_transformers import SentenceTransformer
     from PIL import Image
-    import torch
 
-    model = SentenceTransformer(model_name)
-    effective_count = min(len(image_paths), max_to_embed)
+    model = SentenceTransformer(IMAGE_EMBEDDING_MODEL)
+    n_chunks = max(len(image_paths), max_to_embed)
+    effective = min(len(image_paths), max_to_embed)
 
-    print(f"Embedding {effective_count} images with CLIP...")
+    print(f"Embedding {effective} / {max_to_embed} images with CLIP……
 
     embeddings = []
+    valid_count = 0
+
     for i, img_path in enumerate(image_paths[:max_to_embed]):
         try:
             img = Image.open(img_path).convert("RGB")
@@ -124,15 +127,16 @@ def embed_images_batch(image_paths: List[str], model_name: str = IMAGE_EMBEDDING
             if n > 0:
                 emb_list = [x / n for x in emb_list]
             embeddings.append(emb_list[:EMBEDDING_DIM_IMAGE])
+            valid_count += 1
         except Exception as e:
             print(f"Warning: Failed to embed image {img_path}: {e}")
             embeddings.append([0.0] * EMBEDDING_DIM_IMAGE)
 
-    # Pad remaining embeddings with zeros if fewer images than max_to_embed
+    # Pad to exactly max_to_embed entries
     while len(embeddings) < max_to_embed:
         embeddings.append([0.0] * EMBEDDING_DIM_IMAGE)
 
-    return embeddings
+    return embeddings, valid_count
 
 
 # ---- pipeline ----
@@ -165,7 +169,6 @@ class NestBuildConfig:
     # Image download config
     download_images: bool = True
     image_cache_dir: str = "nest_cache_images"
-    # How many images to actually embed (set < total to save time)
     max_images_to_embed: int = MAX_IMAGES_TO_EMBED
 
 
@@ -178,16 +181,13 @@ def download_card_image(image_uri: str, cache_dir: str) -> str:
     """Download a card image from Scryfall URI to cache directory."""
     os.makedirs(cache_dir, exist_ok=True)
 
-    # Extract filename from URI
     uri_parts = image_uri.rstrip("/").split("/")
     filename = uri_parts[-1] if uri_parts else "card_image.jpg"
-    # Ensure proper extension
     if not "." in filename:
         filename += ".jpg"
 
     cache_path = os.path.join(cache_dir, filename)
 
-    # Skip if already cached
     if os.path.exists(cache_path):
         return cache_path
 
@@ -195,7 +195,7 @@ def download_card_image(image_uri: str, cache_dir: str) -> str:
         import urllib.request
         url = image_uri
         if not url.startswith(("http://", "https://")):
-            return cache_path  # skip invalid URIs
+            return cache_path
 
         req = urllib.request.Request(
             url, headers={"User-Agent": "SpellbookMTG/1.0"}
@@ -205,24 +205,15 @@ def download_card_image(image_uri: str, cache_dir: str) -> str:
         return cache_path
     except Exception as e:
         print(f"Warning: Failed to download {image_uri}: {e}")
-        return cache_path  # return placeholder path
+        return cache_path
 
 
 def build_nest(db_path: Path, output_path: Path, config: NestBuildConfig = None) -> str:
-    """Read mtg.sqlite, create chunks+embeddings (text+image), build .nest file.
+    """Read mtg.sqlite, create chunks+embeddings (text+image), build .nest file."""
 
-    Args:
-        db_path: Path to mtg.sqlite database
-        output_path: Where to write the .nest file
-        config: NestBuildConfig with all pipeline settings
-
-    Returns:
-        Path to the built .nest file
-    """
     if config is None:
         config = NestBuildConfig(output_path=str(output_path))
 
-    # Compute model hashes if not set
     if not config.model_hash_text:
         config.model_hash_text = compute_model_hash(config.embedding_model_text)
     if not config.model_hash_image:
@@ -234,7 +225,6 @@ def build_nest(db_path: Path, output_path: Path, config: NestBuildConfig = None)
     # 1. Read all cards from SQLite
     conn = sqlite3.connect(str(db_path))
     cursor = conn.cursor()
-
     cursor.execute(
         "SELECT oracle_id, name, type_line, oracle_text, mana_cost, rarity, set_code, image_uri FROM cards"
     )
@@ -253,7 +243,6 @@ def build_nest(db_path: Path, output_path: Path, config: NestBuildConfig = None)
         if not name:
             continue
 
-        # Build canonical text
         text_parts = [f"Name: {name}"]
         if type_line:
             text_parts.append(f"Type: {type_line}")
@@ -276,43 +265,58 @@ def build_nest(db_path: Path, output_path: Path, config: NestBuildConfig = None)
 
     print(f"Created {len(specs)} chunks")
 
-    # 3. Generate text embeddings
-    print(f"Generating text embeddings using {config.embedding_model_text}...")
+    # 3. Generate text embeddings (all 38K chunks - this is fast enough)
+    print(f"Generating text embeddings using {config.embedding_model_text}……")
     text_embeddings = embed_texts(texts)
 
-    # 4. Download images and generate image embeddings
+    # 4. Download images for a subset and generate image embeddings
     image_cache_dir = config.image_cache_dir
     os.makedirs(image_cache_dir, exist_ok=True)
 
-    print(f"Downloading and embedding card images (max {config.max_images_to_embed})...")
-
-    # Determine which images to actually process
-    image_paths_to_process = []
-    image_embed_indices = {}  # map chunk_index -> whether we have a valid embedding
+    # Only download/embed images for a limited subset (first N cards with image URIs)
+    image_download_indices = []
+    image_download_paths = []
 
     for i, uri in enumerate(image_uris):
-        if uri and config.download_images:
+        if uri and config.download_images and len(image_download_indices) < config.max_images_to_embed:
             path = download_card_image(uri, image_cache_dir)
-            image_paths_to_process.append(path)
-            image_embed_indices[i] = len(image_paths_to_process) - 1  # index in the processed list
+            image_download_indices.append(i)
+            image_download_paths.append(path)
         else:
-            image_embed_indices[i] = -1  # no image
+            image_download_indices.append(-1)  # marker: no image download
 
-    # Generate image embeddings
-    if image_paths_to_process:
-        image_embeddings = embed_images_batch(image_paths_to_process, config.embedding_model_image, config.max_images_to_embed)
+    print(f"Downloading {len(image_download_paths)} card images (out of {len(specs)} chunks)……")
+
+    # Generate image embeddings for the downloaded subset
+    if image_download_paths:
+        image_embeddings_subset, valid_count = embed_images_limited(image_download_paths, config.max_images_to_embed)
     else:
-        image_embeddings = [[0.0] * EMBEDDING_DIM_IMAGE] * min(MAX_IMAGES_TO_EMBED, len(specs))
+        image_embeddings_subset = []
+        valid_count = 0
 
-    # 5. Build chunks dict for nest.build()
+    # 5. Build the full image embeddings array: one entry per chunk
+    # First chunk_idx -> subset index mapping
+    chunk_to_subset = {}
+    for idx, orig_idx in enumerate(image_download_indices):
+        if orig_idx >= 0:
+            chunk_to_subset[orig_idx] = idx
+
+    # Build full vectors list: one per chunk, with image embeddings for the subset
+    full_image_vectors = []
+    for i in range(len(specs)):
+        if i in chunk_to_subset:
+            subset_idx = chunk_to_subset[i]
+            if subset_idx < len(image_embeddings_subset):
+                full_image_vectors.append(image_embeddings_subset[subset_idx])
+            else:
+                full_image_vectors.append([0.0] * EMBEDDING_DIM_IMAGE)
+        else:
+            full_image_vectors.append([0.0] * EMBEDDING_DIM_IMAGE)
+
+    # 6. Build chunks dict for nest.build()
     chunks = []
     for i, (spec, txt_emb) in enumerate(zip(specs, text_embeddings, strict=False)):
-        # Get image embedding for this chunk
-        img_idx = image_embed_indices.get(i, -1)
-        if img_idx >= 0 and img_idx < len(image_embeddings):
-            img_emb = image_embeddings[img_idx]
-        else:
-            img_emb = [0.0] * EMBEDDING_DIM_IMAGE
+        img_emb = full_image_vectors[i]
 
         chunks.append(
             dict(
@@ -320,33 +324,29 @@ def build_nest(db_path: Path, output_path: Path, config: NestBuildConfig = None)
                 source_uri=spec.source_uri,
                 byte_start=spec.byte_start,
                 byte_end=spec.byte_end,
-                embedding=txt_emb,  # text embedding for text-based search
-                # Image embedding will be routed through the "image" space in nest
+                embedding=txt_emb,
+                # Image embedding will be accessed through the "image" space in nest runtime
             )
         )
 
-    # 6. Set up multimodal spaces for image embeddings
-    # nest-format expects spaces as list of dicts with name, model_hash, dtype, vectors
-    # One space per modality. We add image space alongside text.
-    spaces = []
-    # Always include image space (even if all zeros, so the runtime knows it exists)
+    # 7. Set up multimodal spaces for image embeddings
     spaces.append(
         dict(
             name="image",
             model_hash=config.model_hash_image,
             dtype="float32",
-            vectors=image_embeddings,  # one row per chunk (capped at max_to_embed)
+            vectors=full_image_vectors,  # one entry per chunk (most are zero-padded)
         )
     )
 
-    # 7. Emit .nest file
+    # 8. Emit .nest file
     output_path_str = str(output_path)
     if os.path.exists(output_path_str):
         os.unlink(output_path_str)
 
     _nest.build(
         output_path=output_path_str,
-        embedding_model=config.embedding_model_text,  # primary model in manifest
+        embedding_model=config.embedding_model_text,
         embedding_dim=config.embedding_dim_text,
         chunker_version=config.chunker_version,
         model_hash=config.model_hash_text,
@@ -367,12 +367,12 @@ def build_nest(db_path: Path, output_path: Path, config: NestBuildConfig = None)
         hnsw_m=config.hnsw_m,
         hnsw_ef_construction=config.hnsw_ef_construction,
         hnsw_seed=config.hnsw_seed,
-        spaces=spaces if spaces else None,  # multimodal spaces extension
+        spaces=spaces if spaces else None,
     )
 
     print(f"Built .nest file: {output_path_str}")
 
-    # 8. Validate using NestFile
+    # 9. Validate
     db = _nest.NestFile.open(output_path_str)
     db.validate()
     print("Validation PASSED")
@@ -400,8 +400,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--max-images",
         type=int,
-        default=800,
-        help="Maximum number of card images to embed (default: 800, set 0 to skip)",
+        default=200,
+        help="Maximum number of card images to embed (default: 200, set 0 to use all with images)",
     )
 
     args = parser.parse_args()
@@ -412,7 +412,7 @@ if __name__ == "__main__":
         output_path=args.output_path,
         download_images=not args.no_images,
         image_cache_dir=args.image_cache,
-        max_images_to_embed=max_images if max_images > 0 else MAX_IMAGES_TO_EMBED,
+        max_images_to_embed=max_images if max_images > 0 else 10000,  # large number = use all available
     )
 
     result = build_nest(Path(args.db_path), Path(args.output_path), config)

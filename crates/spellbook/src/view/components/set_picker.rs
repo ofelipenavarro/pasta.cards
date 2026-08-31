@@ -131,7 +131,7 @@ impl SetPicker {
                     match key {
                         EditKey::Left | EditKey::Right | EditKey::Home | EditKey::End => {
                             let changed = self.field.handle_edit_key(key).1;
-                            return (true, changed);
+                            (true, changed)
                         }
                         EditKey::Up => {
                             if !self.options.is_empty() {
@@ -194,12 +194,11 @@ impl SetPicker {
                     let dd = self.dropdown_rect(block);
                     if dd.contains(x, y) {
                         let i = ((y - dd.y - GAP) / (ROW_H + GAP)).floor() as usize;
-                        if i < self.options.len() {
-                            if self.hovered != Some(i) {
+                        if i < self.options.len()
+                            && self.hovered != Some(i) {
                                 self.hovered = Some(i);
                                 return EventResult::changed();
                             }
-                        }
                     }
                 }
                 EventResult::IGNORED

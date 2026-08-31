@@ -236,6 +236,8 @@ impl SpellbookView {
     pub fn new(width: f32, height: f32, tx: Sender<Command>) -> Self {
         let theme = Theme::hoff();
         let collection = collection::CollectionScreen::new(&theme);
+        let wishlist = wishlist::WishlistScreen::new(&theme);
+        let games = games::GamesScreen::new(&theme);
         Self {
             width,
             height,
@@ -254,9 +256,9 @@ impl SpellbookView {
             home: home::HomeScreen::new(),
             decks: decks::DecksScreen::new(),
             collection,
-            wishlist: wishlist::WishlistScreen::new(),
+            wishlist,
             scanner: scanner::ScannerScreen::new(),
-            games: games::GamesScreen::new(),
+            games,
         }
     }
 

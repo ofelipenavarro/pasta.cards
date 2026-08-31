@@ -318,28 +318,25 @@ impl ImportDeckModal {
             return (Some(ImportDeckAnswer::Cancelled), result);
         }
 
-        match *event {
-            WidgetEvent::MouseDown { x, y } => {
-                let fr = self.list.field_rect(l.list);
-                if fr.contains(x, y) {
-                    self.focus = true;
-                    self.list.click(x - fr.x);
-                    return (None, EventResult::changed());
+        if let WidgetEvent::MouseDown { x, y } = *event {
+            let fr = self.list.field_rect(l.list);
+            if fr.contains(x, y) {
+                self.focus = true;
+                self.list.click(x - fr.x);
+                return (None, EventResult::changed());
+            }
+            if !self.import_in_flight {
+                if l.merge_chip.contains(x, y) {
+                    self.merge_chip.selected = true;
+                    self.replace_chip.selected = false;
+                    return (None, EventResult::clicked());
                 }
-                if !self.import_in_flight {
-                    if l.merge_chip.contains(x, y) {
-                        self.merge_chip.selected = true;
-                        self.replace_chip.selected = false;
-                        return (None, EventResult::clicked());
-                    }
-                    if l.replace_chip.contains(x, y) {
-                        self.replace_chip.selected = true;
-                        self.merge_chip.selected = false;
-                        return (None, EventResult::clicked());
-                    }
+                if l.replace_chip.contains(x, y) {
+                    self.replace_chip.selected = true;
+                    self.merge_chip.selected = false;
+                    return (None, EventResult::clicked());
                 }
             }
-            _ => {}
         }
 
         let cancel_r = self.cancel_btn.handle_event(event, l.cancel);

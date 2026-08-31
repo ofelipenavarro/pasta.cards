@@ -185,14 +185,14 @@ impl CardModal {
                         relevant.then(|| {
                             self.phase = Phase::Ready(detail.clone());
                         });
-                        return relevant;
+                        relevant
                     }
                     Err(_) => {
                         if matches!(self.phase, Phase::Loading) {
                             self.phase = Phase::Missing;
                             return true;
                         }
-                        return false;
+                        false
                     }
                 }
             }
@@ -445,7 +445,7 @@ impl CardModal {
         {
             let r = self.add_one.handle_event(event, l.add_one);
             if r.clicked {
-                self.flipped = self.flipped; // keep the face the user is looking at
+                // Keeps the face the user is looking at.
                 self.add_copy(
                     CollectionIn {
                         card_name: self
@@ -712,9 +712,9 @@ impl CardModal {
         } else {
             rel_front.clone()
         };
-        match shown.as_deref().and_then(|r| {
+        match shown.as_deref().map(|r| {
             let rel = images::with_variant(r, "normal");
-            Some((rel.clone(), art.get(&rel)))
+            (rel.clone(), art.get(&rel))
         }) {
             Some((_, Some(handle))) => {
                 c.push(SceneNode::Image {

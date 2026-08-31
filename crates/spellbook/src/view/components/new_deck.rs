@@ -515,48 +515,45 @@ impl NewDeckModal {
             }
         }
 
-        match *event {
-            WidgetEvent::MouseDown { x, y } => {
-                // Field clicks.
-                for (slot, rect) in [
-                    (Slot::Commander, l.commander),
-                    (Slot::Commander2, l.commander2),
-                    (Slot::Name, l.name),
-                    (Slot::Philosophy, l.philosophy),
-                    (Slot::Tags, l.tags),
-                ] {
-                    let fr = self.field_mut(slot).field_rect(rect);
-                    if fr.contains(x, y) {
-                        self.set_focus(Some(slot), ctx);
-                        self.field_mut(slot).click(x - fr.x);
-                        return (None, EventResult::changed());
-                    }
-                }
-
-                // Auto-build checkbox.
-                if l.auto.contains(x, y) {
-                    self.auto_build.checked = !self.auto_build.checked;
-                    self.save.label = if self.auto_build.checked {
-                        "Montar deck".to_string()
-                    } else {
-                        "Criar deck".to_string()
-                    };
-                    return (None, EventResult::clicked());
-                }
-
-                // Selects (only when auto-build is on).
-                if self.auto_build.checked {
-                    if l.bracket.contains(x, y) {
-                        self.set_focus(None, ctx);
-                        return (None, result.merge(self.bracket.handle_event(event, l.bracket)));
-                    }
-                    if l.mode.contains(x, y) {
-                        self.set_focus(None, ctx);
-                        return (None, result.merge(self.mode.handle_event(event, l.mode)));
-                    }
+        if let WidgetEvent::MouseDown { x, y } = *event {
+            // Field clicks.
+            for (slot, rect) in [
+                (Slot::Commander, l.commander),
+                (Slot::Commander2, l.commander2),
+                (Slot::Name, l.name),
+                (Slot::Philosophy, l.philosophy),
+                (Slot::Tags, l.tags),
+            ] {
+                let fr = self.field_mut(slot).field_rect(rect);
+                if fr.contains(x, y) {
+                    self.set_focus(Some(slot), ctx);
+                    self.field_mut(slot).click(x - fr.x);
+                    return (None, EventResult::changed());
                 }
             }
-            _ => {}
+
+            // Auto-build checkbox.
+            if l.auto.contains(x, y) {
+                self.auto_build.checked = !self.auto_build.checked;
+                self.save.label = if self.auto_build.checked {
+                    "Montar deck".to_string()
+                } else {
+                    "Criar deck".to_string()
+                };
+                return (None, EventResult::clicked());
+            }
+
+            // Selects (only when auto-build is on).
+            if self.auto_build.checked {
+                if l.bracket.contains(x, y) {
+                    self.set_focus(None, ctx);
+                    return (None, result.merge(self.bracket.handle_event(event, l.bracket)));
+                }
+                if l.mode.contains(x, y) {
+                    self.set_focus(None, ctx);
+                    return (None, result.merge(self.mode.handle_event(event, l.mode)));
+                }
+            }
         }
 
         // Buttons.
@@ -586,7 +583,7 @@ impl NewDeckModal {
         &mut self,
         event: &WidgetEvent,
         l: &Layout,
-        ctx: &mut ScreenCtx,
+        _ctx: &mut ScreenCtx,
     ) -> EventResult {
         let slot = self.focus.unwrap();
         let field_rect = match slot {
@@ -599,9 +596,7 @@ impl NewDeckModal {
 
         match *event {
             WidgetEvent::MouseMove { x, y } => {
-                let hovered = (!suggestions.is_empty())
-                    .then(|| suggest.contains(x, y))
-                    .unwrap_or(false)
+                let hovered = if !suggestions.is_empty() { suggest.contains(x, y) } else { false }
                     .then(|| ((y - suggest.y - 4.0) / (SUGGEST_H + 4.0)).floor() as usize)
                     .filter(|i| *i < suggestions.len());
                 if hovered != *hover {

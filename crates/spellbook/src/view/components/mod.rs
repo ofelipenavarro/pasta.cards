@@ -27,6 +27,7 @@ pub use crate::view::{EditKey, ScreenCtx};
 // nothing references them.
 
 pub mod add_card;
+pub mod add_game;
 pub mod card_modal;
 pub mod delete_deck;
 pub mod edit_deck;

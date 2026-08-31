@@ -16,10 +16,6 @@ use engine::theme::{Intent, Theme};
 use engine::ui::widgets::{EmptyState, EventResult, Rect, WidgetEvent, rounded_rect};
 use spellbook_core::client::{Command, Event, HomeData};
 
-use crate::view::components::add_card::{AddCardAnswer, AddCardModal};
-use crate::view::components::edit_deck::{EditDeckAnswer, EditDeckModal};
-use crate::view::components::delete_deck::{DeleteDeckAnswer, DeleteDeckModal};
-use crate::view::components::import_deck::{ImportDeckAnswer, ImportDeckModal};
 use super::{EditKey, Route, ScreenCtx, deck_tile, grid_columns, group_label, panel, text};
 use crate::art::ArtCache;
 
@@ -42,12 +38,10 @@ pub struct HomeScreen {
     data: Option<Box<HomeData>>,
     hover: Option<Hit>,
     loading: EmptyState,
-    add_card_modal: AddCardModal,
 }
 
 impl HomeScreen {
     pub fn new() -> Self {
-        let theme = Theme::hoff();
         Self {
             data: None,
             hover: None,
@@ -56,7 +50,6 @@ impl HomeScreen {
                 "Lendo a coleção, os decks e o histórico do banco local.",
             )
             .icon("house"),
-            add_card_modal: AddCardModal::new(&theme),
         }
     }
 
@@ -68,6 +61,7 @@ impl HomeScreen {
         let Event::HomeLoaded(result) = event else {
             return false;
         };
+        
         match result {
             Ok(data) => {
                 // The shell re-enters the route on navigation, which reloads;
@@ -80,19 +74,6 @@ impl HomeScreen {
                 true
             }
         }
-        // Handle AddCardModal events
-        let (answer, result) = self.add_card_modal.on_event(event, ctx.width, ctx.height);
-        match answer {
-            Some(AddCardAnswer::Saved) => {
-                self.add_card_modal.close();
-                ctx.toast("Carta adicionada à coleção.", Intent::Constructive);
-            }
-            Some(AddCardAnswer::Cancelled) => {
-                self.add_card_modal.close();
-            }
-            None => {}
-        }
-        true
     }
 
     /// Nothing on the dashboard takes text yet - the search fields live on

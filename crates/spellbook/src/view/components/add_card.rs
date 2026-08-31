@@ -543,9 +543,7 @@ impl AddCardModal {
         let suggest = self.suggest_rect(name_field);
         match *event {
             WidgetEvent::MouseMove { x, y } => {
-                let hovered = (!self.suggestions.is_empty())
-                    .then(|| suggest.contains(x, y))
-                    .unwrap_or(false)
+                let hovered = if !self.suggestions.is_empty() { suggest.contains(x, y) } else { false }
                     .then(|| ((y - suggest.y - 4.0) / (SUGGEST_H + 4.0)).floor() as usize)
                     .filter(|i| *i < self.suggestions.len());
                 if hovered != self.hover_suggest {

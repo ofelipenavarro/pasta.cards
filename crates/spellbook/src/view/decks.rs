@@ -18,7 +18,6 @@ use super::{
     EditKey, Route, ScreenCtx, deck_tile, grid_columns, group_label, text, with_alpha,
 };
 use crate::art::ArtCache;
-use crate::view::ScreenAction;
 use crate::view::components::delete_deck::{DeleteDeckAnswer, DeleteDeckModal};
 use crate::view::components::edit_deck::{EditDeckAnswer, EditDeckModal};
 use crate::view::components::import_deck::{ImportDeckAnswer, ImportDeckModal};
@@ -554,6 +553,7 @@ impl DecksScreen {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::view::ScreenAction;
     use spellbook_core::client::Command;
 
     fn sample_decks() -> Vec<DeckSummary> {
