@@ -158,6 +158,13 @@ impl WishlistScreen {
                                 "Carta movida para a coleção.",
                                 Intent::Constructive,
                             );
+                            // The JS reloaded the wishlist right after
+                            // acquiring; do the same so counts update.
+                            if let Some(tx) = &self.tx {
+                                let _ = tx.send(Command::ListWishlist {
+                                    q: self.search.clone(),
+                                });
+                            }
                         }
                         Err(e) => ctx.toast(e.detail().to_string(), Intent::Destructive),
                     }
@@ -168,14 +175,16 @@ impl WishlistScreen {
                 if let Some(idx) = self.removing.take() {
                     match result {
                         Ok(removal) => {
-                            if removal.remaining == 0 {
+                            if removal.remaining == 0 && idx < self.wishes.len() {
                                 self.wishes.remove(idx);
+                                self.recompute_visible();
                             } else if let Some(group) = self.wishes.get_mut(idx) {
                                 group.total_quantity = removal.remaining;
                                 // One unit left the first stored entry.
                                 if let Some(first) = group.entries.first_mut() {
                                     first.quantity = (first.quantity - 1).max(0);
                                 }
+                                self.recompute_visible();
                             }
                         }
                         Err(e) => ctx.toast(e.detail().to_string(), Intent::Destructive),
@@ -336,7 +345,11 @@ impl WishlistScreen {
         }
         // Open filter menu floats over the grid and eats the event first.
         let toggle = self.filter_toggle_rect(self.last_content);
-        self.filter_bar.handle_event(event, toggle, window)
+        let result = self.filter_bar.handle_event(event, toggle, window);
+        if result.clicked {
+            self.recompute_visible();
+        }
+        result
     }
 
     pub fn render_overlay(
@@ -801,7 +814,9 @@ impl WishlistScreen {
             theme.glass.edge.0,
             1.0,
         ));
-        let _ = icons::icon_at("trash-2", 14.0, theme.colors.danger.0, rem.x + 10.0, rem.y + 7.0);
+        if let Some(node) = icons::icon_at("trash-2", 14.0, theme.colors.danger.0, rem.x + 10.0, rem.y + 7.0) {
+            c.push(node);
+        }
         text(
             c,
             "Remover",

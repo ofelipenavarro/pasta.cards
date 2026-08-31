@@ -342,6 +342,16 @@ impl SpellbookView {
         if route == self.route {
             return;
         }
+        // Entering a deck detail always starts at the top; going back to the
+        // grid keeps the grid's scroll position.
+        if matches!(route, Route::Deck(_)) {
+            self.page_scroll[route.scroll_slot()].scroll_to(0.0);
+        }
+        // The JS re-fetched the deck list on every navigation so the sidebar
+        // sub-list stayed current after create/rename/delete.
+        if route.in_decks_section() {
+            self.tx.send(Command::ListDecks).ok();
+        }
         self.route = route;
         self.enter_route();
     }
@@ -694,7 +704,7 @@ impl SpellbookView {
 
     fn handle_sidebar(&mut self, event: &WidgetEvent) -> EventResult {
         // Hover expands the rail (the CSS transition's pointer equivalent).
-        if let WidgetEvent::MouseMove { x, y: _ } = *event {
+        if let WidgetEvent::MouseMove { x, y } = *event {
             let was = self.sidebar_expanded;
             // Expand only when hovering the actual rail area: collapsed it is
             // 64px wide, expanded 248. Using the live width prevents content
@@ -706,6 +716,20 @@ impl SpellbookView {
                 if self.route.in_decks_section() && self.sidebar_decks.is_empty() {
                     self.tx.send(Command::ListDecks).ok();
                 }
+                return EventResult::changed();
+            }
+            // Sub-list hover tracking.
+            if self.sidebar_sublist_visible() {
+                let hovered = self
+                    .sidebar_sublist_rects()
+                    .iter()
+                    .position(|(_, r)| r.contains(x, y));
+                if hovered != self.sidebar_sublist_hover {
+                    self.sidebar_sublist_hover = hovered;
+                    return EventResult::changed();
+                }
+            } else if self.sidebar_sublist_hover.is_some() {
+                self.sidebar_sublist_hover = None;
                 return EventResult::changed();
             }
         }
@@ -788,13 +812,14 @@ impl SpellbookView {
             animating |= self.data_panel.tick(dt, &ctx);
             animating |= match self.route {
                 Route::Home => self.home.tick(dt, &mut ctx),
+                Route::Deck(_) => self.deck_detail.tick(dt, &mut ctx),
                 _ => false,
             };
         }
         animating |= match self.route {
             Route::Home => false, // handled above with ctx
+            Route::Deck(_) => false, // handled above with ctx
             Route::Decks => self.decks.tick(dt),
-            Route::Deck(_) => self.deck_detail.tick(dt),
             Route::Collection => self.collection.tick(dt),
             Route::Wishlist => self.wishlist.tick(dt),
             Route::Scanner => self.scanner.tick(dt),

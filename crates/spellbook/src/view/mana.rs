@@ -114,15 +114,23 @@ impl Pip {
         }
     }
 
-    /// Background of the pill. Compounds take the color of their last part
-    /// (`2/B` → black); numbers are generic.
+    /// Background of the pill. Compounds take the color of the first part
+    /// that is a mana letter (`2/B` → black, `B/P` → black, `W/U` → white);
+    /// numbers are generic. The JS uses the colored background with a dark
+    /// glyph, and Phyrexian costs keep the mana color, not the gray "P".
     pub fn color(&self) -> [f32; 4] {
         match self {
             Pip::Letter(c) => pip_color(*c),
             Pip::Number(_) => pip_color('0'),
             Pip::Compound(c) => {
-                let last = c.rsplit('/').next().unwrap_or("C");
-                pip_color(last.chars().next().unwrap_or('C'))
+                let letter = c
+                    .split('/')
+                    .find_map(|part| {
+                        let ch = part.chars().next()?;
+                        if "WUBRGSC".contains(ch) { Some(ch) } else { None }
+                    })
+                    .unwrap_or('C');
+                pip_color(letter)
             }
         }
     }
@@ -235,9 +243,10 @@ mod tests {
     }
 
     #[test]
-    fn compound_takes_last_parts_color() {
+    fn compound_takes_first_parts_color() {
         assert_eq!(Pip::Compound("2/B".into()).color(), pip_color('B'));
-        assert_eq!(Pip::Compound("B/P".into()).color(), pip_color('P'));
+        assert_eq!(Pip::Compound("B/P".into()).color(), pip_color('B'));
+        assert_eq!(Pip::Compound("W/U".into()).color(), pip_color('W'));
     }
 
     #[test]

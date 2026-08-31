@@ -544,7 +544,32 @@ impl FilterBar {
         }
         group!("Cor", menu.x + 10.0, rects.colors[0].y);
         for (i, rect) in rects.colors.iter().enumerate() {
-            self.color_chips[i].render(c, *rect, theme);
+            let (letter, _) = FILTER_COLORS[i];
+            let active = self.state.colors.contains(&letter);
+            let bg = crate::view::mana::pip_color(letter);
+            let alpha = if active { 1.0 } else { 0.35 };
+            c.push_to_layer(overlay, engine::ui::widgets::rounded_rect(
+                rect.x,
+                rect.y,
+                rect.w,
+                rect.h,
+                theme.radius.md,
+                [
+                    bg[0],
+                    bg[1],
+                    bg[2],
+                    alpha,
+                ],
+            ));
+            text(
+                c,
+                &letter.to_string(),
+                11.0,
+                600,
+                rect.x + rect.w / 2.0 - 4.0,
+                rect.y + 5.0,
+                [0.10, 0.10, 0.12, 1.0],
+            );
         }
         group!("CMC", menu.x + 10.0, rects.cmcs[0].y);
         for (i, rect) in rects.cmcs.iter().enumerate() {

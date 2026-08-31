@@ -205,15 +205,32 @@ impl GamesScreen {
         if n == 0 {
             return 0.0;
         }
-        const CHIP_W: f32 = 130.0;
-        const CHIP_ROW_H: f32 = 30.0;
-        let per_row = ((content.w / (CHIP_W + 8.0)).floor() as usize).max(1);
-        n.div_ceil(per_row) as f32 * CHIP_ROW_H
+        // Must match the render loop's width estimate and row height.
+        const CHIP_ROW_H: f32 = HIGHLIGHT_ROW_H + 6.0;
+        let mut hx = 0.0f32;
+        let mut rows = 1usize;
+        let max_w = content.w;
+        let Some(stats) = &self.stats else {
+            return 0.0;
+        };
+        for hl in stats.top_highlight_cards.iter().take(n) {
+            let label = format!("{} · {}x", hl.card_name, hl.n);
+            let cw = label.len() as f32 * 6.4 + 20.0;
+            if hx + cw > max_w {
+                hx = 0.0;
+                rows += 1;
+            }
+            hx += cw + 8.0;
+        }
+        rows as f32 * CHIP_ROW_H
     }
 
-    /// Y of the "Destaques" group label.
+    /// Y of the "Destaques" group label. Derived from the actual stat rows,
+    /// not a hardcoded single row.
     fn highlights_y(&self, content: Rect) -> f32 {
-        content.y + BTN_ROW_H + 12.0 + STAT_H + 30.0
+        let (cols, _) = super::grid_columns(content.w, 170.0, 280.0, STAT_GAP);
+        let rows = 3usize.div_ceil(cols);
+        content.y + BTN_ROW_H + 12.0 + rows as f32 * (STAT_H + STAT_GAP) + 30.0
     }
 
     /// Y where the highlight chip rows start.

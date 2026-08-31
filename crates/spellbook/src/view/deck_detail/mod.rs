@@ -235,6 +235,11 @@ pub struct DeckDetailScreen {
     header_rects: HeaderRects,
 
     tx: Option<Sender<Command>>,
+    /// Debounce state for the inline add-card search.
+    add_search_dirty: bool,
+    add_search_debounce: f32,
+    /// Last content rect used for layout, needed by overlay hit-tests.
+    last_content: Rect,
 
     empty: EmptyState,
     loading_empty: EmptyState,
@@ -302,6 +307,9 @@ impl DeckDetailScreen {
             sort_menu_open: false,
             header_rects: HeaderRects::default(),
             tx: None,
+            add_search_dirty: false,
+            add_search_debounce: 0.0,
+            last_content: Rect::default(),
             empty: EmptyState::new("Deck não encontrado", "O deck pode ter sido excluído.")
                 .icon("layers"),
             loading_empty: EmptyState::new("Carregando deck…", "Lendo cartas do banco local.")
@@ -414,6 +422,13 @@ impl DeckDetailScreen {
                     }
                     Err(e) => ctx.toast(e.detail().to_string(), engine::theme::Intent::Destructive),
                 }
+                return true;
+            }
+            Event::CardsFound(cards) => {
+                if !self.add_search_dirty {
+                    return changed;
+                }
+                self.add_suggestions = cards.iter().take(6).map(|c| c.name.clone()).collect();
                 return true;
             }
             _ => {}
@@ -568,6 +583,7 @@ impl DeckDetailScreen {
     }
 
     pub fn handle_event(&mut self, event: &WidgetEvent, content: Rect, ctx: &mut ScreenCtx) -> EventResult {
+        self.last_content = content;
         if self.deck.is_none() && self.loading {
             return self.loading_empty.handle_event(event, content);
         }
@@ -575,6 +591,61 @@ impl DeckDetailScreen {
             // Modais e confirmações ficam no caminho overlay.
             if self.overlay_open_screens() {
                 return self.handle_overlay_event(event, content_to_window(content), ctx);
+            }
+            // Header buttons (export/import/edit/delete).
+            let h = self.header_rects;
+            if h.export.contains(x, y) {
+                self.export_menu_open = !self.export_menu_open;
+                self.sort_menu_open = false;
+                return EventResult::clicked();
+            }
+            if h.import.contains(x, y)
+                && let Some(id) = self.deck_id
+            {
+                self.import_deck_modal.open(id, ctx);
+                return EventResult::clicked();
+            }
+            if h.edit.contains(x, y)
+                && let Some(deck) = &self.deck
+            {
+                let summary = spellbook_core::ops::decks::DeckSummary {
+                    id: deck.id,
+                    name: deck.name.clone(),
+                    commander_name: deck.commander_name.clone(),
+                    commander_name_2: deck.commander_name_2.clone(),
+                    philosophy: deck.philosophy.clone(),
+                    tags: deck.tags.clone(),
+                    created_at: deck.created_at.clone(),
+                    total_cards: deck.total_cards,
+                    wins: 0,
+                    losses: 0,
+                    commander_image: None,
+                    commander_image_2: None,
+                    color_identity: None,
+                };
+                self.edit_deck_modal.open(&summary, ctx);
+                return EventResult::clicked();
+            }
+            if h.delete.contains(x, y)
+                && let Some(deck) = &self.deck
+            {
+                let summary = spellbook_core::ops::decks::DeckSummary {
+                    id: deck.id,
+                    name: deck.name.clone(),
+                    commander_name: deck.commander_name.clone(),
+                    commander_name_2: deck.commander_name_2.clone(),
+                    philosophy: deck.philosophy.clone(),
+                    tags: deck.tags.clone(),
+                    created_at: deck.created_at.clone(),
+                    total_cards: deck.total_cards,
+                    wins: 0,
+                    losses: 0,
+                    commander_image: None,
+                    commander_image_2: None,
+                    color_identity: None,
+                };
+                self.delete_deck_modal.open(&summary, ctx);
+                return EventResult::clicked();
             }
             if self.toolbar_click(x, y, content, ctx) {
                 return EventResult::clicked();
@@ -680,7 +751,7 @@ impl DeckDetailScreen {
         // Sort menu: open and click-through.
         if self.sort_menu_open {
             if let WidgetEvent::MouseDown { x, y } = *event {
-                let content = window_to_content(window);
+                let content = self.last_content;
                 let menu_r = self.sort_menu_rect(content);
                 if menu_r.contains(x, y) {
                     for (i, mode) in SortMode::ALL.iter().enumerate() {
@@ -705,7 +776,7 @@ impl DeckDetailScreen {
         // Export menu: open and click-through.
         if self.export_menu_open {
             if let WidgetEvent::MouseDown { x, y } = *event {
-                let content = window_to_content(window);
+                let content = self.last_content;
                 let menu_r = self.export_menu_rect(content);
                 if menu_r.contains(x, y) {
                     let formats = ["moxfield", "text"];
@@ -735,9 +806,14 @@ impl DeckDetailScreen {
             return EventResult::IGNORED;
         }
         // Open filter menu eats the event first.
-        let content = window_to_content(window);
+        let content = self.last_content;
         let t = self.toolbar_rects(content);
-        self.filter_bar.handle_event(event, t.filter, content)
+        let result = self.filter_bar.handle_event(event, t.filter, content);
+        if result.clicked {
+            // The JS reloaded the list on any filter change.
+            // Here the deck detail refilters locally.
+        }
+        result
     }
 
     fn overlay_open_screens(&self) -> bool {
@@ -758,9 +834,8 @@ impl DeckDetailScreen {
             if !rect.contains(x, y) {
                 continue;
             }
-            // The ✕ button occupies the row's right side; the rest of the row
-            // opens the card modal (not wired yet — same as clicking a name).
-            let remove_btn = Rect::new(rect.x + rect.w - 70.0, rect.y + 4.0, 64.0, rect.h - 8.0);
+            // The ✕ button matches render_card_row's rect exactly.
+            let remove_btn = Rect::new(rect.x + rect.w - 58.0, rect.y + 5.0, 48.0, rect.h - 10.0);
             if !remove_btn.contains(x, y) {
                 return None; // abrir card modal depois; por ora nada
             }
@@ -783,8 +858,17 @@ impl DeckDetailScreen {
     }
 
     /// Suggestion under (x, y), for the inline add search.
-    fn hit_suggestion_at(&self, _x: f32, _y: f32, _content: Rect) -> Option<(String, Option<String>)> {
-        None
+    fn hit_suggestion_at(&self, x: f32, y: f32, content: Rect) -> Option<(String, Option<String>)> {
+        if self.add_suggestions.is_empty() {
+            return None;
+        }
+        let t = self.toolbar_rects(content);
+        let suggest = Rect::new(t.add.x, t.add.y + t.add.h + 4.0, t.add.w, 6.0 * 34.0 + 4.0);
+        if !suggest.contains(x, y) {
+            return None;
+        }
+        let idx = ((y - suggest.y - 4.0) / 34.0).floor() as usize;
+        self.add_suggestions.get(idx).map(|name| (name.clone(), None))
     }
 }
 /// Helper: entry-or-default for the rarity buckets above.

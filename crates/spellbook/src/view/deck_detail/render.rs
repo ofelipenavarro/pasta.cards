@@ -257,16 +257,27 @@ impl DeckDetailScreen {
                 .and_then(|i| i.rel.as_deref())
                 .map(|r| images::with_variant(r, "normal"));
             match rel.as_deref().and_then(|r| art.get(r)) {
-                Some(_handle) => {
-                    // Full art panel — draw a placeholder name for now (image
-                    // rendering lands with the card modal's art path).
-                    text(c, &cmd.card_name, 14.0, 700, s.commander.x + 14.0, cy, theme.colors.accent.0);
+                Some(handle) => {
+                    // Full art panel, like the JS's commander art.
+                    let art_w = 72.0;
+                    let art_h = art_w * 680.0 / 488.0;
+                    let art_rect = Rect::new(s.commander.x + 14.0, cy, art_w, art_h);
+                    c.push(SceneNode::Image {
+                        x: art_rect.x,
+                        y: art_rect.y,
+                        w: art_rect.w,
+                        h: art_rect.h,
+                        image: handle,
+                        corner_radius: theme.radius.md,
+                    });
+                    text(c, &cmd.card_name, 14.0, 700, s.commander.x + 14.0 + art_w + 12.0, cy + 8.0, theme.colors.accent.0);
+                    cy += art_h.max(48.0);
                 }
                 None => {
                     text(c, &cmd.card_name, 14.0, 700, s.commander.x + 14.0, cy, theme.colors.text.0);
+                    cy += 24.0;
                 }
             }
-            cy += 24.0;
             if let Some(tl) = Some(cmd.type_line.clone())
                 && !tl.is_empty()
             {
@@ -404,15 +415,35 @@ impl DeckDetailScreen {
                 theme.colors.text_dim.0,
             );
         }
-        // Legend, like the JS's `.curve-legend`.
+        // Legend, like the JS's `.curve-legend`. Only colors present in the deck.
         let legend_x = curve_x;
         let legend_y = s.curve.y + s.curve.h - 12.0;
-        let legend: [(&str, &str); 2] = [("B", "B"), ("C", "Incolor")];
         let mut lx = legend_x;
-        for (color, label) in legend {
-            c.push(rounded_rect(lx, legend_y, 8.0, 8.0, 4.0, curve_color(color)));
-            text(c, label, 10.0, 400, lx + 12.0, legend_y - 2.0, theme.glass.text_placeholder.0);
-            lx += 12.0 + label.len() as f32 * 6.2 + 14.0;
+        let mut seen = std::collections::HashSet::new();
+        for cards in deck.by_type.values() {
+            for card in cards {
+                if let Some(colors) = &card.colors {
+                    for color in colors.chars() {
+                        if seen.insert(color) {
+                            let label = match color {
+                                'W' => "Branco",
+                                'U' => "Azul",
+                                'B' => "Preto",
+                                'R' => "Vermelho",
+                                'G' => "Verde",
+                                _ => "Incolor",
+                            };
+                            c.push(rounded_rect(lx, legend_y, 8.0, 8.0, 4.0, curve_color(&color.to_string())));
+                            text(c, label, 10.0, 400, lx + 12.0, legend_y - 2.0, theme.glass.text_placeholder.0);
+                            lx += 12.0 + label.len() as f32 * 6.2 + 14.0;
+                        }
+                    }
+                }
+            }
+        }
+        if seen.is_empty() {
+            c.push(rounded_rect(lx, legend_y, 8.0, 8.0, 4.0, curve_color("C")));
+            text(c, "Incolor", 10.0, 400, lx + 12.0, legend_y - 2.0, theme.glass.text_placeholder.0);
         }
     }
 
@@ -432,6 +463,28 @@ impl DeckDetailScreen {
         }
         // Add field.
         self.add_field.render(c, t.add, theme);
+        // Suggestion list under the add field.
+        if !self.add_suggestions.is_empty() {
+            let suggest = Rect::new(t.add.x, t.add.y + t.add.h + 4.0, t.add.w, 6.0 * 34.0 + 4.0);
+            c.push(rounded_rect(
+                suggest.x,
+                suggest.y,
+                suggest.w,
+                suggest.h,
+                theme.radius.md,
+                theme.glass.popover.0,
+            ));
+            c.push(menu_shadow(suggest, theme.radius.md));
+            for (i, name) in self.add_suggestions.iter().enumerate() {
+                let row = Rect::new(
+                    suggest.x + 4.0,
+                    suggest.y + 4.0 + i as f32 * 34.0,
+                    suggest.w - 8.0,
+                    30.0,
+                );
+                text(c, name, 12.0, 500, row.x + 8.0, row.y + 7.0, theme.colors.text.0);
+            }
+        }
         // Sort (single chip showing the current mode, opens the menu above).
         let sort_label = format!("Ordenar: {}", self.sort.label());
         c.push(rounded_rect(t.sort.x, t.sort.y, t.sort.w, CHIP_H, CHIP_H / 2.0, theme.glass.surface.0));
@@ -602,7 +655,8 @@ impl DeckDetailScreen {
         // Add-card inline: debounce the card search.
         let consumed = self.add_field.handle_text(s);
         if consumed {
-            self.add_suggestions.clear();
+            self.add_search_dirty = true;
+            self.add_search_debounce = 0.25;
         }
         if self.filter_bar.is_open() {
             // filter menu's text input, when it grows one
@@ -680,7 +734,20 @@ impl DeckDetailScreen {
         false
     }
 
-    pub fn tick(&mut self, _dt: f32) -> bool {
+    pub fn tick(&mut self, dt: f32, ctx: &mut ScreenCtx) -> bool {
+        // Debounced add-card search.
+        if self.add_search_dirty {
+            self.add_search_debounce -= dt;
+            if self.add_search_debounce <= 0.0 {
+                self.add_search_dirty = false;
+                let q = self.add_field.value().trim().to_string();
+                if q.len() >= 2 {
+                    ctx.send(Command::SearchCards { q, limit: 6 });
+                } else {
+                    self.add_suggestions.clear();
+                }
+            }
+        }
         false
     }
 
