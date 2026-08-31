@@ -240,9 +240,9 @@ pub struct DeckDetailScreen {
     loading_empty: EmptyState,
 }
 
-pub const TILE_MIN_W: f32 = 150.0;
-pub const TILE_MAX_W: f32 = 236.0;
-const ROW_H: f32 = 34.0;
+pub(crate) const TILE_MIN_W: f32 = 150.0;
+pub(crate) const TILE_MAX_W: f32 = 236.0;
+pub(crate) const ROW_H: f32 = 34.0;
 
 mod events;
 mod groups;
@@ -741,9 +741,9 @@ fn by_bucket_entry<'m>(
 // ---------------------------------------------------------------------------
 
 /// Toolbar row height and control sizes.
-const TOOLBAR_H: f32 = 48.0;
-const CHIP_H: f32 = 28.0;
-const CHIP_GAP: f32 = 8.0;
-const GROUP_LABEL_H: f32 = 30.0;
-const STAT_PANEL_H: f32 = 190.0;
+pub(crate) const TOOLBAR_H: f32 = 48.0;
+pub(crate) const CHIP_H: f32 = 28.0;
+pub(crate) const CHIP_GAP: f32 = 8.0;
+pub(crate) const GROUP_LABEL_H: f32 = 30.0;
+pub(crate) const STAT_PANEL_H: f32 = 190.0;
 

@@ -3,6 +3,11 @@
 //! button pair, and the ownership tag.
 
 use engine::ui::widgets::Rect;
+use spellbook_core::client::Command;
+
+use super::super::{EditKey, ScreenCtx};
+use super::DeckDetailScreen;
+use super::{SortMode, GroupBy, ViewMode};
 
 // ---------------------------------------------------------------------------
 // Event rect helpers

@@ -13,7 +13,8 @@ use super::super::text;
 use super::super::{group_label, panel, with_alpha};
 use super::super::mana;
 use super::DeckDetailScreen;
-use super::layout::{HeaderRects, LayoutHit, StatsRects, CHIP_H, STAT_PANEL_H};
+use super::layout::{HeaderRects, LayoutHit, StatsRects};
+use super::{CHIP_H, STAT_PANEL_H};
 use super::events::ownership_tag;
 use crate::art::ArtCache;
 
