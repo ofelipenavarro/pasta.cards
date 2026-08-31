@@ -275,7 +275,8 @@ def build_nest(db_path: Path, output_path: Path, config: NestBuildConfig = None)
 
     # 3. Download images if requested
     if config.download_images and config.image_cache_dir:
-        print(f"Downloading {len([u for u in image_uris if u images])} card images...")
+        num_images = len([u for u in image_uris if u])
+print(f"Downloading {num_images} card images...")
         for i, (uri, path) in enumerate(zip(image_uris, image_paths)):
             if uri:
                 image_paths[i] = download_card_image(uri, config.image_cache_dir)
