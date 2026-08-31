@@ -38,6 +38,9 @@ pub struct ImportDeckModal {
     preview: Option<Box<ImportPreview>>,
     preview_in_flight: bool,
     import_in_flight: bool,
+    /// Set when `import_in_flight` transitions true → false with success, so
+    /// `just_imported` only fires after a real commit, not after preview.
+    import_completed: bool,
 
     merge_chip: Chip,
     replace_chip: Chip,
@@ -79,6 +82,7 @@ impl ImportDeckModal {
             preview: None,
             preview_in_flight: false,
             import_in_flight: false,
+            import_completed: false,
             merge_chip: Chip::new("Somar à lista atual").selected(true).interactive(true),
             replace_chip: Chip::new("Trocar o deck inteiro").interactive(true),
             preview_btn: Button::new("Importar"),
@@ -96,6 +100,7 @@ impl ImportDeckModal {
         self.preview = None;
         self.preview_in_flight = false;
         self.import_in_flight = false;
+        self.import_completed = false;
         self.merge_chip.selected = true;
         self.replace_chip.selected = false;
         self.error = None;
@@ -242,6 +247,7 @@ impl ImportDeckModal {
                 match result {
                     Ok(_) => {
                         self.error = None;
+                        self.import_completed = true;
                         true
                     }
                     Err(e) => {
@@ -255,10 +261,7 @@ impl ImportDeckModal {
     }
 
     pub fn just_imported(&self) -> bool {
-        self.deck_id.is_some()
-            && !self.import_in_flight
-            && self.error.is_none()
-            && self.preview.is_some()
+        self.import_completed
     }
 
     // -- Actions --------------------------------------------------------------

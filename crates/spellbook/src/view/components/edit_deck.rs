@@ -66,6 +66,9 @@ pub struct EditDeckModal {
 
     error: Option<String>,
     saving: bool,
+    /// Set when `saving` transitions true → false with a success, so
+    /// `just_saved` is only true after a save, never on `open`.
+    save_completed: bool,
     open: bool,
 }
 
@@ -112,6 +115,7 @@ impl EditDeckModal {
             hover_suggest2: None,
             error: None,
             saving: false,
+            save_completed: false,
             open: false,
         }
     }
@@ -295,6 +299,7 @@ impl EditDeckModal {
                 match result {
                     Ok(()) => {
                         self.error = None;
+                        self.save_completed = true;
                         true
                     }
                     Err(e) => {
@@ -308,8 +313,9 @@ impl EditDeckModal {
     }
 
     /// Returns true when the last update succeeded and the modal should close.
+    /// Only true after an actual save round-trip, never right after `open`.
     pub fn just_saved(&self) -> bool {
-        self.deck_id.is_some() && !self.saving && self.error.is_none()
+        self.save_completed
     }
 
     // -- Save -----------------------------------------------------------------

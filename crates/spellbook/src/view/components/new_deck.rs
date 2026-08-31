@@ -325,7 +325,7 @@ impl NewDeckModal {
 
     // -- Data events ----------------------------------------------------------
 
-    pub fn on_event(&mut self, event: &Event, _ctx: &mut ScreenCtx) -> bool {
+    pub fn on_event(&mut self, event: &Event, ctx: &mut ScreenCtx) -> bool {
         match event {
             Event::CardsFound(cards) => {
                 let slot2 = self.focus == Some(Slot::Commander2);
@@ -355,7 +355,7 @@ impl NewDeckModal {
                 match result {
                     Ok(id) => {
                         if self.auto_build.checked {
-                            self.build_phase = BuildPhase::Building { deck_id: *id };
+                            self.send_autobuild(*id, ctx);
                             true
                         } else {
                             self.created_id = Some(*id);
@@ -483,7 +483,9 @@ impl NewDeckModal {
             philosophy: self.philosophy.value_opt(),
             mode,
         })));
-        self.build_phase = BuildPhase::Building { deck_id };
+        // Transition to Polling so tick does not re-send the command.
+        self.build_phase = BuildPhase::Polling { deck_id };
+        self.status_poll_timer = 0.0;
     }
 
     // -- Pointer input --------------------------------------------------------
@@ -744,11 +746,6 @@ impl NewDeckModal {
             }
         }
 
-        // If CreateDeck succeeded and auto-build is on, send AutoBuild now.
-        if let BuildPhase::Building { deck_id } = self.build_phase {
-            self.send_autobuild(deck_id, ctx);
-        }
-
         self.focus.is_some()
     }
 
@@ -955,10 +952,9 @@ mod tests {
 
         let changed = modal.on_event(&Event::DeckCreated(Ok(7)), &mut ctx);
         assert!(changed);
-        assert!(matches!(modal.build_phase, BuildPhase::Building { deck_id: 7 }));
+        assert!(matches!(modal.build_phase, BuildPhase::Polling { deck_id: 7 }));
 
-        // tick sends the AutoBuild command.
-        modal.tick(0.1, &mut ctx);
+        // AutoBuild was sent immediately by the event handler.
         let cmd = rx.try_recv().expect("expected AutoBuild");
         assert!(matches!(cmd, Command::AutoBuild(_)));
     }

@@ -404,6 +404,7 @@ impl SpellbookView {
         // Sidebar deck sub-list (the router.js nav-decks-list).
         if let Event::DecksListed(decks) = event {
             self.sidebar_decks = decks.clone();
+            return true;
         }
 
         // When the route enters the decks section with the sub-list empty,
@@ -633,19 +634,33 @@ impl SpellbookView {
     fn sync_sidebar_scroll(&mut self) {
         let viewport = self.sidebar_viewport();
         self.sidebar_scroll.set_viewport(viewport.h);
+        let sublist_h = if self.sidebar_sublist_visible() {
+            self.sidebar_decks.len() as f32 * 32.0
+        } else {
+            0.0
+        };
         self.sidebar_scroll
-            .set_content(Route::NAV.len() as f32 * (NAV_H + 4.0));
+            .set_content(Route::NAV.len() as f32 * (NAV_H + 4.0) + sublist_h);
     }
 
     fn sidebar_item_rects(&self) -> Vec<Rect> {
         let offset = self.sidebar_scroll.offset();
+        let sublist_h = if self.sidebar_sublist_visible() {
+            self.sidebar_decks.len() as f32 * 32.0
+        } else {
+            0.0
+        };
         Route::NAV
             .iter()
             .enumerate()
             .map(|(i, _)| {
+                // The decks sub-list lives under "Meus Decks" (index 1) and
+                // pushes the links below it down, like the CSS's in-flow
+                // .nav-subitems did.
+                let extra = if i > 1 { sublist_h } else { 0.0 };
                 Rect::new(
                     12.0,
-                    SIDEBAR_TOP + i as f32 * (NAV_H + 4.0) - offset,
+                    SIDEBAR_TOP + i as f32 * (NAV_H + 4.0) + extra - offset,
                     self.sidebar_width() - 24.0,
                     NAV_H,
                 )
@@ -679,26 +694,29 @@ impl SpellbookView {
 
     fn handle_sidebar(&mut self, event: &WidgetEvent) -> EventResult {
         // Hover expands the rail (the CSS transition's pointer equivalent).
-        if let WidgetEvent::MouseMove { x, y } = *event {
+        if let WidgetEvent::MouseMove { x, y: _ } = *event {
             let was = self.sidebar_expanded;
-            self.sidebar_expanded = x < SIDEBAR_W;
+            // Expand only when hovering the actual rail area: collapsed it is
+            // 64px wide, expanded 248. Using the live width prevents content
+            // pixels (x=64..248) from triggering the expansion.
+            self.sidebar_expanded = x < self.sidebar_width();
             if was != self.sidebar_expanded {
                 // Width change reflows everything; load the deck sub-list
                 // when the decks section opens expanded.
                 if self.route.in_decks_section() && self.sidebar_decks.is_empty() {
                     self.tx.send(Command::ListDecks).ok();
                 }
-                return EventResult::clicked();
+                return EventResult::changed();
             }
         }
         // Data panel button (footer band) — click handling first, its rect
         // overlaps nothing.
         if let WidgetEvent::MouseDown { .. } = *event {
+            let panel = self.data_panel_rect();
             let ctx = ScreenCtx {
                 tx: &self.tx,
                 actions: &mut self.actions,
             };
-            let panel = Rect::new(0.0, 0.0, SIDEBAR_W, SIDEBAR_FOOTER_H);
             if self.data_panel.handle_event(event, panel, &ctx) {
                 self.drain_actions();
                 return EventResult::clicked();
@@ -1050,6 +1068,17 @@ impl SpellbookView {
             );
             self.data_panel.render(c, panel, theme);
         }
+    }
+
+    /// Rect of the data panel in the footer band, matching `render_sidebar`.
+    fn data_panel_rect(&self) -> Rect {
+        let foot_y = self.height - SIDEBAR_FOOTER_H + 10.0;
+        Rect::new(
+            0.0,
+            foot_y + 22.0,
+            self.sidebar_width(),
+            self.height - foot_y - 22.0,
+        )
     }
 
     fn render_header(&self, c: &mut Compositor, theme: &Theme) {

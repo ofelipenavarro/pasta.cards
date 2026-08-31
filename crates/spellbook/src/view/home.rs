@@ -149,15 +149,16 @@ impl HomeScreen {
     // -- Layout ---------------------------------------------------------------
 
     /// The five stat cards across the top, navigable like the old
-    /// `data-stat-nav` tiles.
+    /// `data-stat-nav` tiles. Starts below the header buttons.
     fn stat_rects(&self, content: Rect) -> Vec<Rect> {
         let (cols, col_w) = grid_columns(content.w, 170.0, 280.0, STAT_GAP);
+        let y0 = content.y + 44.0 + 12.0; // header buttons + gap
         (0..5)
             .map(|i| {
                 let (row, col) = (i / cols, i % cols);
                 Rect::new(
                     content.x + col as f32 * (col_w + STAT_GAP),
-                    content.y + row as f32 * (STAT_H + STAT_GAP),
+                    y0 + row as f32 * (STAT_H + STAT_GAP),
                     col_w,
                     STAT_H,
                 )
@@ -172,7 +173,7 @@ impl HomeScreen {
 
     /// Y where the deck section starts.
     fn decks_y(&self, content: Rect) -> f32 {
-        content.y + self.stat_rows(content) as f32 * (STAT_H + STAT_GAP) + 40.0
+        content.y + 44.0 + 12.0 + self.stat_rows(content) as f32 * (STAT_H + STAT_GAP) + 40.0
     }
 
     /// One rect per deck tile, plus the "Novo Deck" tile at the end.
@@ -313,10 +314,12 @@ impl HomeScreen {
     }
 
     /// The two header buttons, top-right (the page-header btn row).
+    /// Positioned inside the content rect, above the stats, so they scroll
+    /// with the page and are not clipped by the header band.
     fn header_btn_rects(&self, content: Rect) -> (Rect, Rect) {
         let (aw, ah) = self.add_btn.preferred_size();
         let (nw, nh) = self.new_deck_btn.preferred_size();
-        let y = content.y - 58.0; // header row sits above the stats
+        let y = content.y;
         let add = Rect::new(content.x + content.w - aw - nw - 10.0, y, aw, ah);
         let new_deck = Rect::new(content.x + content.w - nw, y, nw, nh);
         (add, new_deck)
