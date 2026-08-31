@@ -20,6 +20,7 @@ use super::{GroupBy, SortMode, ViewMode, curve_color, ROW_H};
 use super::{CHIP_H, STAT_PANEL_H};
 use super::events::{confirm_buttons, ownership_tag};
 use crate::art::ArtCache;
+use crate::view::components::confirm::render_confirm_dialog;
 
 impl DeckDetailScreen {
 

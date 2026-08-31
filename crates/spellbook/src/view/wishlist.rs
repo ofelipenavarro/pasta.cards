@@ -359,6 +359,7 @@ impl WishlistScreen {
                 theme,
                 "Tirar da wishlist?",
                 &format!("{name} sai da sua lista de compras."),
+                ("Remover", true),
             );
         } else {
             // The open filter menu floats over content, outside the scroll clip.
