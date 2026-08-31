@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use engine::compositor::{Compositor, LayerId, SceneNode};
 use engine::theme::Theme;
 use engine::ui::widgets::{Rect, glass_pill, menu_shadow, rounded_rect, rounded_rect_stroke};
+use spellbook_core::client::Command;
 use spellbook_core::ops::decks::{DeckCard, DeckDetail};
 use spellbook_core::images;
 
@@ -14,6 +15,8 @@ use super::super::{group_label, panel, with_alpha};
 use super::super::mana;
 use super::DeckDetailScreen;
 use super::layout::{HeaderRects, LayoutHit, StatsRects};
+use super::super::{EditKey, ScreenCtx, text as core_text};
+use super::{GroupBy, SortMode, ViewMode, curve_color, ROW_H};
 use super::{CHIP_H, STAT_PANEL_H};
 use super::events::ownership_tag;
 use crate::art::ArtCache;
@@ -671,7 +674,7 @@ impl DeckDetailScreen {
         false
     }
 
-    fn send_add_confirmed(&mut self, name: &str, oracle_id: Option<&str>) {
+    pub(crate) fn send_add_confirmed(&mut self, name: &str, oracle_id: Option<&str>) {
         if let Some(tx) = &self.tx
             && let Some(deck_id) = self.deck_id
         {
@@ -687,7 +690,7 @@ impl DeckDetailScreen {
         }
     }
 
-    fn open_add_card(&mut self, name: &str, oracle_id: Option<&str>, ctx: &mut ScreenCtx) {
+    pub(crate) fn open_add_card(&mut self, name: &str, oracle_id: Option<&str>, ctx: &mut ScreenCtx) {
         if let Some(tx) = &self.tx
             && let Some(deck_id) = self.deck_id
         {

@@ -2,7 +2,7 @@
 //! that keep the content and overlay event paths in agreement, the confirm
 //! button pair, and the ownership tag.
 
-use engine::ui::widgets::Rect;
+use engine::ui::widgets::{Rect, WidgetEvent};
 use spellbook_core::client::Command;
 
 use super::super::{EditKey, ScreenCtx};
@@ -15,7 +15,7 @@ use super::{SortMode, GroupBy, ViewMode};
 
 /// Simulated window for events coming down the content path (the shell
 /// passes the content rect): a generous band below for confirm buttons.
-fn content_to_window(content: Rect) -> Rect {
+pub(crate) fn content_to_window(content: Rect) -> Rect {
     Rect::new(
         content.x,
         content.y,
@@ -28,13 +28,13 @@ fn content_to_window(content: Rect) -> Rect {
 /// window for overlay events): inset by nothing, height shrunk to the
 /// content area. Both helpers exist so the two paths agree on confirm
 /// button placement.
-fn window_to_content(window: Rect) -> Rect {
+pub(crate) fn window_to_content(window: Rect) -> Rect {
     window
 }
 
 /// The Confirmar / Cancelar buttons of both dialogs, centred at the bottom
 /// of the window band.
-fn confirm_buttons(window: Rect) -> (Rect, Rect) {
+pub(crate) fn confirm_buttons(window: Rect) -> (Rect, Rect) {
     let cx = window.x + window.w / 2.0;
     let by = window.y + window.h / 2.0 + 40.0;
     (
@@ -45,7 +45,7 @@ fn confirm_buttons(window: Rect) -> (Rect, Rect) {
 
 
 /// The ownership tag's (label, color), mirroring the JS's ownTag classes.
-fn ownership_tag(o: &spellbook_core::wizard::CardOwnership) -> (String, [f32; 4]) {
+pub(crate) fn ownership_tag(o: &spellbook_core::wizard::CardOwnership) -> (String, [f32; 4]) {
     use spellbook_core::wizard::OwnershipStatus;
     match o.status {
         OwnershipStatus::Missing => ("Não tenho".to_string(), [0.83, 0.30, 0.27, 1.0]),
@@ -63,7 +63,7 @@ impl super::DeckDetailScreen {
         Rect::new(t.sort.x + 150.0, t.sort.y + t.sort.h, 220.0, 78.0)
     }
 
-    fn sort_menu_rect(&self, content: Rect) -> Rect {
+    pub(crate) fn sort_menu_rect(&self, content: Rect) -> Rect {
         let t = self.toolbar_rects(content);
         Rect::new(
             t.sort.x,
@@ -74,7 +74,7 @@ impl super::DeckDetailScreen {
     }
 
     /// Toolbar pointer routing, shared by the page and overlay paths.
-    fn toolbar_click(&mut self, x: f32, y: f32, content: Rect, _ctx: &mut ScreenCtx) -> bool {
+    pub(crate) fn toolbar_click(&mut self, x: f32, y: f32, content: Rect, _ctx: &mut ScreenCtx) -> bool {
         let t = self.toolbar_rects(content);
         if self.export_menu_open {
             let menu = self.export_menu_rect(content);

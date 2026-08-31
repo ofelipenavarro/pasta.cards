@@ -249,7 +249,7 @@ mod groups;
 mod layout;
 mod render;
 
-use events::*;
+pub(crate) use events::*;
 use groups::*;
 use layout::*;
 use render::*;

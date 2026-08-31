@@ -9,6 +9,7 @@ use spellbook_core::ops::decks::DeckCard;
 use super::DeckDetailScreen;
 use super::super::grid_columns;
 use super::super::components::filters::FilterBar;
+use super::{CHIP_GAP, CHIP_H, GROUP_LABEL_H, ROW_H, STAT_PANEL_H, TILE_MAX_W, TILE_MIN_W, TOOLBAR_H, ViewMode};
 
 pub struct StatsRects {
     pub commander: Rect,
@@ -35,7 +36,7 @@ pub struct HeaderRects {
 }
 
 /// A hit target laid out this frame: group label, list row, or tile.
-enum LayoutHit {
+pub(crate) enum LayoutHit {
     GroupLabel,
     Row { group: String, idx: usize },
     Tile { group: String, idx: usize },
@@ -103,7 +104,7 @@ fn category_label(cat: &str) -> &'static str {
 
 impl DeckDetailScreen {
     /// Content rect of each top stats panel, given the full content rect.
-    fn stats_rects(&self, content: Rect) -> StatsRects {
+    pub(crate) fn stats_rects(&self, content: Rect) -> StatsRects {
         let panel_h = if self.synergy_open {
             230.0
         } else {
@@ -124,17 +125,17 @@ impl DeckDetailScreen {
     }
 
     /// Y of the toolbar row.
-    fn toolbar_y(&self, content: Rect) -> f32 {
+    pub(crate) fn toolbar_y(&self, content: Rect) -> f32 {
         content.y + self.stats_rects(content).height + 20.0
     }
 
-    fn toolbar_rect(&self, content: Rect) -> Rect {
+    pub(crate) fn toolbar_rect(&self, content: Rect) -> Rect {
         Rect::new(content.x, self.toolbar_y(content), content.w, TOOLBAR_H)
     }
 
     /// Chip rects across the toolbar, left to right:
     /// [add field][view chips][group chips][sort][filter].
-    fn toolbar_rects(&self, content: Rect) -> ToolbarRects {
+    pub(crate) fn toolbar_rects(&self, content: Rect) -> ToolbarRects {
         let bar = self.toolbar_rect(content);
         let y = bar.y + (TOOLBAR_H - CHIP_H) / 2.0;
         let mut x = bar.x;
@@ -162,7 +163,7 @@ impl DeckDetailScreen {
         let sort = Rect::new(x, y, sort_w, CHIP_H);
         x += sort_w + CHIP_GAP + 14.0;
 
-        let filter = Rect::new(x, y, super::components::filters::FilterBar::toggle_w(), CHIP_H.max(36.0));
+        let filter = Rect::new(x, y, crate::view::components::filters::FilterBar::toggle_w(), CHIP_H.max(36.0));
 
         ToolbarRects {
             add,
@@ -174,7 +175,7 @@ impl DeckDetailScreen {
     }
 
     /// Y of the first group label below the toolbar.
-    fn cards_y(&self, content: Rect) -> f32 {
+    pub(crate) fn cards_y(&self, content: Rect) -> f32 {
         self.toolbar_y(content) + TOOLBAR_H + 14.0
     }
 
@@ -182,7 +183,7 @@ impl DeckDetailScreen {
         self.compute_groups().iter().map(|(_, cards)| cards.len()).sum()
     }
 
-    fn card_rects(&self, content: Rect) -> Vec<(LayoutHit, Rect)> {
+    pub(crate) fn card_rects(&self, content: Rect) -> Vec<(LayoutHit, Rect)> {
         let groups = self.compute_groups();
         let y0 = self.cards_y(content);
         let mut out: Vec<(LayoutHit, Rect)> = Vec::new();
@@ -246,8 +247,7 @@ impl DeckDetailScreen {
         (bottom + 24.0 - content.y).max(content.h)
     }
 
-    fn hit_at(&self, x: f32, y: f32, content: Rect) -> Option<Hit> {
-        let _ = (x, y, content);
+    fn hit_at(&self, _x: f32, _y: f32, _content: Rect) -> Option<()> {
         None
     }
 

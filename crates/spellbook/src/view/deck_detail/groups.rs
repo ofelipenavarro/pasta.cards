@@ -10,7 +10,7 @@ use super::super::components::filters::{card_cmc_bucket, FilterCard};
 use super::{GroupBy, DeckCardRef};
 
 /// The JS's colorGroupKey: single color letter, "M" for multicolor, "C" for colorless.
-fn color_group_key(c: &DeckCard) -> &'static str {
+pub(crate) fn color_group_key(c: &DeckCard) -> &'static str {
     let letters: Vec<char> = c.colors.as_deref().unwrap_or("").chars().collect();
     match letters.len() {
         0 => "C",
@@ -39,8 +39,8 @@ fn color_group_label(k: &str) -> String {
     }
 }
 
-const RARITY_ORDER: [&str; 7] = ["common", "uncommon", "rare", "mythic", "special", "bonus", "outro"];
-fn rarity_label(r: &str) -> String {
+pub(crate) const RARITY_ORDER: [&str; 7] = ["common", "uncommon", "rare", "mythic", "special", "bonus", "outro"];
+pub(crate) fn rarity_label(r: &str) -> String {
     match r {
         "common" => "Comum".to_string(),
         "uncommon" => "Incomum".to_string(),
@@ -53,7 +53,7 @@ fn rarity_label(r: &str) -> String {
     }
 }
 
-fn category_label(cat: &str) -> &'static str {
+pub(crate) fn category_label(cat: &str) -> &'static str {
     match cat {
         "Land" => "Terrenos",
         "Creature" => "Criaturas",
