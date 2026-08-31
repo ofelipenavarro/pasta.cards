@@ -102,6 +102,19 @@ pub enum Command {
     DeckSynergy {
         deck_id: i64,
     },
+    /// Moxfield/plain-text export of a deck's non-commander list.
+    /// Moxfield wants "1 Card Name" lines including the commander; plain
+    /// text is the same without the commander block.
+    ExportDeck {
+        deck_id: i64,
+        format: String,
+    },
+    /// Per-card EDHREC theme tags (card name -> tags) for the deck's
+    /// "Subtipo" group-by. Currently answers an empty map - the core stub
+    /// is the honest state of the cache.
+    DeckTags {
+        deck_id: i64,
+    },
     CreateDeck(Box<decks::DeckIn>),
     UpdateDeck {
         deck_id: i64,
@@ -208,6 +221,15 @@ pub enum Event {
     SynergyLoaded {
         deck_id: i64,
         synergy: Box<decks::Synergy>,
+    },
+    DeckExported {
+        deck_id: i64,
+        format: String,
+        result: Result<String>,
+    },
+    DeckTagsLoaded {
+        deck_id: i64,
+        tags: std::collections::HashMap<String, Vec<String>>,
     },
     DeckCreated(Result<i64>),
     DeckUpdated(Result<()>),
@@ -398,6 +420,18 @@ fn run(command: Command, on_event: &(impl Fn(Event) + ?Sized)) {
                 on_event(E::Failed(e));
             }
         }
+        C::ExportDeck { deck_id, format } => {
+            let result = decks::export_deck(deck_id, &format);
+            on_event(E::DeckExported {
+                deck_id,
+                format,
+                result,
+            })
+        }
+        C::DeckTags { deck_id } => on_event(E::DeckTagsLoaded {
+            deck_id,
+            tags: decks::deck_tags(deck_id),
+        }),
 
         C::ListWishlist { q } => on_event(E::WishlistListed(wishlist::list_wishlist(&q))),
         C::AddWishlist(p) => on_event(E::WishlistAdded(wishlist::add_wishlist(*p))),

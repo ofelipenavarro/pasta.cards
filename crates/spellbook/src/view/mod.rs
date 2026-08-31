@@ -14,6 +14,7 @@
 mod collection;
 pub mod components;
 mod data_panel;
+mod deck_detail;
 mod deck_tile;
 mod decks;
 mod games;

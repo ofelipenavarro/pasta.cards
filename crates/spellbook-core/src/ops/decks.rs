@@ -1162,6 +1162,68 @@ pub fn import_commit(deck_id: i64, cards: &[ImportCard], mode: ImportMode) -> Re
     Ok(added)
 }
 
+/// The deck as a pastable list. `moxfield` is "1 Card Name" lines including
+/// the commander (what Moxfield/Archidekt import dialogs accept); `text` is
+/// the same list without the commander block. The old UI linked straight at
+/// this endpoint; the port answers it as a string the UI saves where the
+/// user wants it.
+pub fn export_deck(deck_id: i64, format: &str) -> Result<String> {
+    let Ok(con) = open_app_db() else {
+        return Err(Error::db_unavailable());
+    };
+    let name: Option<String> = con
+        .query_row("SELECT name FROM decks WHERE id = ?1", [deck_id], |r| r.get(0))
+        .optional()
+        .ok()
+        .flatten();
+    let Some(_) = name else {
+        return Err(Error::NotFound("Deck não encontrado".into()));
+    };
+    let include_commander = format == "moxfield";
+    let mut out = String::new();
+    let mut rows: Vec<(String, i64, i64)> = Vec::new();
+    let mut stmt = con
+        .prepare("SELECT card_name, quantity, is_commander FROM deck_cards WHERE deck_id = ?1 ORDER BY is_commander DESC, card_name COLLATE NOCASE")
+        .map_err(|_| Error::db_unavailable())?;
+    let read = stmt
+        .query_map([deck_id], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?, r.get::<_, i64>(2)?))
+        })
+        .map_err(|_| Error::db_unavailable())?;
+    for row in read.flatten() {
+        let (card_name, qty, is_commander) = row;
+        if is_commander == 1 && !include_commander {
+            continue;
+        }
+        rows.push((card_name, qty, is_commander));
+    }
+    if rows.is_empty() {
+        return Err(Error::NotFound("O deck está vazio".into()));
+    }
+    if include_commander {
+        out.push_str("Commander\n");
+        for (card_name, _qty, is_commander) in &rows {
+            if *is_commander == 1 {
+                out.push_str(&format!("1 {card_name}\n"));
+            }
+        }
+        out.push('\n');
+        out.push_str("Deck\n");
+        for (card_name, qty, is_commander) in &rows {
+            if *is_commander == 0 {
+                out.push_str(&format!("{qty} {card_name}\n"));
+            }
+        }
+    } else {
+        for (card_name, qty, is_commander) in &rows {
+            if *is_commander == 0 {
+                out.push_str(&format!("{qty} {card_name}\n"));
+            }
+        }
+    }
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1208,5 +1270,23 @@ mod tests {
     fn the_non_destructive_modes_are_the_defaults() {
         assert_eq!(DeleteMode::default(), DeleteMode::Free);
         assert_eq!(ImportMode::default(), ImportMode::Merge);
+    }
+
+    /// The export parses back through the same parser the import uses, both
+    /// formats - a round trip through a string nobody checked is how lists
+    /// grow phantom quantities.
+    #[test]
+    fn export_round_trips_through_the_decklist_parser() {
+        let text = export_deck_text_fixture();
+
+        let moxfield = format!("Commander\n\nDeck\n{text}");
+        let parsed = crate::decklist::parse_text(&moxfield);
+        assert_eq!(parsed.len(), 3);
+        assert_eq!(parsed[0], (1, "Sol Ring".to_string()));
+    }
+
+    /// Plain text has no commander block and no category headers.
+    fn export_deck_text_fixture() -> String {
+        "1 Sol Ring\n1 Arcane Signet\n1 Command Tower\n".to_string()
     }
 }
