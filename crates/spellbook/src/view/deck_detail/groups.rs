@@ -1,13 +1,9 @@
 //! How the deck's cards are organized: the port of `computeDeckGroups`
 //! and its helpers (sort, group-by mode, labels).
 
-use std::collections::HashMap;
 
 use spellbook_core::ops::decks::DeckCard;
 
-use super::DeckDetailScreen;
-use super::super::components::filters::{card_cmc_bucket, FilterCard};
-use super::{GroupBy, DeckCardRef};
 
 /// The JS's colorGroupKey: single color letter, "M" for multicolor, "C" for colorless.
 pub(crate) fn color_group_key(c: &DeckCard) -> &'static str {

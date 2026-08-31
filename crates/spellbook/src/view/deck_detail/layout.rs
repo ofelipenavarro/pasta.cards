@@ -1,14 +1,12 @@
 //! Pure layout for the deck detail screen: stat panels, toolbar rects and
 //! the card grid/list, plus the shared types the events side reads.
 
-use std::collections::HashMap;
 
 use engine::ui::widgets::Rect;
 use spellbook_core::ops::decks::DeckCard;
 
 use super::DeckDetailScreen;
 use super::super::grid_columns;
-use super::super::components::filters::FilterBar;
 use super::{CHIP_GAP, CHIP_H, GROUP_LABEL_H, ROW_H, STAT_PANEL_H, TILE_MAX_W, TILE_MIN_W, TOOLBAR_H, ViewMode};
 
 pub struct StatsRects {
@@ -179,10 +177,6 @@ impl DeckDetailScreen {
         self.toolbar_y(content) + TOOLBAR_H + 14.0
     }
 
-    fn visible_cards_count(&self) -> usize {
-        self.compute_groups().iter().map(|(_, cards)| cards.len()).sum()
-    }
-
     pub(crate) fn card_rects(&self, content: Rect) -> Vec<(LayoutHit, Rect)> {
         let groups = self.compute_groups();
         let y0 = self.cards_y(content);
@@ -195,7 +189,7 @@ impl DeckDetailScreen {
                     out.push((LayoutHit::GroupLabel, Rect::new(content.x, y, content.w, GROUP_LABEL_H)));
                     y += GROUP_LABEL_H;
                     let _ = total;
-                    for (i, c) in cards.iter().enumerate() {
+                    for (i, _c) in cards.iter().enumerate() {
                         out.push((
                             LayoutHit::Row { group: gkey.clone(), idx: i },
                             Rect::new(content.x, y, content.w, ROW_H),
@@ -214,7 +208,7 @@ impl DeckDetailScreen {
                     let _ = total;
                     out.push((LayoutHit::GroupLabel, Rect::new(content.x, y, content.w, GROUP_LABEL_H)));
                     y += GROUP_LABEL_H;
-                    for (i, c) in cards.iter().enumerate() {
+                    for (i, _c) in cards.iter().enumerate() {
                         let (row, col) = (i / cols, i % cols);
                         out.push((
                             LayoutHit::Tile { group: gkey.clone(), idx: i },
@@ -245,10 +239,6 @@ impl DeckDetailScreen {
             .map(|(_, r)| r.y + r.h)
             .unwrap_or(self.cards_y(content));
         (bottom + 24.0 - content.y).max(content.h)
-    }
-
-    fn hit_at(&self, _x: f32, _y: f32, _content: Rect) -> Option<()> {
-        None
     }
 
     // -- Pointer / text ------------------------------------------------------

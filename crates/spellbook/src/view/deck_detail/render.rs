@@ -1,7 +1,6 @@
 //! Drawing for the deck detail screen: header, stats panels, toolbar and
 //! the three card-list renderings.
 
-use std::collections::HashMap;
 
 use engine::compositor::{Compositor, LayerId, SceneNode};
 use engine::theme::Theme;
@@ -11,14 +10,14 @@ use spellbook_core::ops::decks::{DeckCard, DeckDetail};
 use spellbook_core::images;
 
 use super::super::text;
-use super::super::{group_label, panel, with_alpha};
+use super::super::{panel, with_alpha};
 use super::super::mana;
 use super::DeckDetailScreen;
-use super::layout::{HeaderRects, LayoutHit, StatsRects};
-use super::super::{EditKey, ScreenCtx, text as core_text};
+use super::layout::{HeaderRects, LayoutHit};
+use super::super::{EditKey, ScreenCtx};
 use super::{GroupBy, SortMode, ViewMode, curve_color, ROW_H};
-use super::{CHIP_H, STAT_PANEL_H};
-use super::events::{confirm_buttons, ownership_tag};
+use super::CHIP_H;
+use super::events::ownership_tag;
 use crate::art::ArtCache;
 use crate::view::components::confirm::render_confirm_dialog;
 

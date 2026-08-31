@@ -24,7 +24,6 @@ use crate::art::ArtCache;
 use crate::view::components::add_card::{AddCardAnswer, AddCardModal};
 use crate::view::components::card_modal::{CardModal, CardModalAnswer};
 use crate::view::components::filters::{FilterBar, matches_filters};
-use crate::view::components::confirm::render_confirm_dialog;
 use crate::view::components::search_field::SearchField;
 
 const SEARCH_H: f32 = 52.0; // LabeledField::height()

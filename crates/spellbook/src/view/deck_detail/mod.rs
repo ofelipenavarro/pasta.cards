@@ -14,29 +14,22 @@
 use std::collections::HashMap;
 use std::sync::mpsc::Sender;
 
-use engine::compositor::{Compositor, LayerId, SceneNode};
 use engine::theme::{Intent, Theme};
 use engine::ui::widgets::{
-    Button, ButtonVariant, Checkbox, Chip, EmptyState, EventResult, IconButton, Rect,
-    WidgetEvent, glass_pill, menu_shadow, rounded_rect, rounded_rect_stroke,
+    Chip, EmptyState, EventResult, Rect,
+    WidgetEvent,
 };
 use spellbook_core::client::{Command, Event};
 use spellbook_core::ops::decks::{DeckCard, DeckDetail, Synergy};
-use spellbook_core::images;
 
-use super::components::add_card::AddCardModal;
-use crate::art::ArtCache;
-use crate::view::mana;
 use super::{
-    EditKey, Route, ScreenCtx, grid_columns, group_label, panel, text, with_alpha,
+    Route, ScreenCtx,
 };
-use super::components::confirm::{Confirm, ConfirmAction};
 use super::components::delete_deck::{DeleteDeckAnswer, DeleteDeckModal};
 use super::components::edit_deck::{EditDeckAnswer, EditDeckModal};
 use super::components::filters::{card_category, matches_filters, FilterBar, FilterCard};
 use super::components::import_deck::{ImportDeckAnswer, ImportDeckModal};
 use super::components::search_field::SearchField;
-use crate::view::deck_tile;
 
 pub const SIDEBAR_W: f32 = 248.0;
 
@@ -250,14 +243,13 @@ pub(crate) const TILE_MAX_W: f32 = 236.0;
 pub(crate) const ROW_H: f32 = 34.0;
 
 pub(crate) mod events;
-mod groups;
-mod layout;
-mod render;
+pub(crate) mod groups;
+pub(crate) mod layout;
+pub(crate) mod render;
 
 pub(crate) use events::*;
-use groups::*;
-use layout::*;
-use render::*;
+pub(crate) use groups::*;
+pub(crate) use layout::*;
 
 impl DeckDetailScreen {
     pub fn new(theme: &Theme) -> Self {

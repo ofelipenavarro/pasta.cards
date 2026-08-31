@@ -5,8 +5,7 @@
 use engine::ui::widgets::{Rect, WidgetEvent};
 use spellbook_core::client::Command;
 
-use super::super::{EditKey, ScreenCtx};
-use super::DeckDetailScreen;
+use super::super::ScreenCtx;
 use super::{SortMode, GroupBy, ViewMode};
 
 // ---------------------------------------------------------------------------
