@@ -280,6 +280,29 @@ impl CardModal {
             y += l.art_strip.h + 14.0;
         }
         l.copies = Rect::new(content.x, y, content.w, self.copies_height(content.w));
+        // Buttons row + detail form inside the copies box.
+        let by = l.copies.y + l.copies.h - 44.0 - if self.detail_open { 190.0 } else { 0.0 };
+        let (one_w, _) = self.add_one.preferred_size();
+        l.add_one = Rect::new(l.copies.x + 14.0, by, one_w, 40.0);
+        let (det_w, _) = self.add_detailed.preferred_size();
+        l.add_detailed = Rect::new(l.add_one.x + one_w + 8.0, by, det_w, 40.0);
+        if self.detail_open {
+            let detail = Rect::new(l.copies.x + 14.0, by + 48.0, l.copies.w - 28.0, 180.0);
+            let col = (detail.w - 10.0) / 2.0;
+            let mut dy = detail.y;
+            l.detail_set = Rect::new(detail.x, dy, col, LabeledField::height());
+            l.detail_artist = Rect::new(detail.x + col + 10.0, dy, col, LabeledField::height());
+            dy += LabeledField::height() + 8.0;
+            l.detail_lang = Rect::new(detail.x, dy + 16.0, col, FIELD_H);
+            l.detail_qty = Rect::new(detail.x + col + 10.0, dy, col, LabeledField::height());
+            dy += LabeledField::height() + 8.0;
+            l.detail_notes = Rect::new(detail.x, dy, detail.w, LabeledField::height());
+            dy += LabeledField::height() + 8.0;
+            let (save_w, _) = self.detail_save.preferred_size();
+            let (cancel_w, _) = self.detail_cancel.preferred_size();
+            l.detail_save = Rect::new(detail.x + detail.w - save_w, dy, save_w, 40.0);
+            l.detail_cancel = Rect::new(l.detail_save.x - 8.0 - cancel_w, dy, cancel_w, 40.0);
+        }
         y += l.copies.h + 14.0;
         if let Some(msg) = &self.add_msg
             && !msg.is_empty()
@@ -1034,56 +1057,30 @@ impl CardModal {
         }
 
         // Buttons row + detail form, pinned above the box's bottom edge.
-        let by = r.y + r.h - 44.0 - if self.detail_open { 190.0 } else { 0.0 };
-        let (one_w, _) = self.add_one.preferred_size();
-        let one = Rect::new(r.x + 14.0, by, one_w, 40.0);
-        let (det_w, _) = self.add_detailed.preferred_size();
-        let det = Rect::new(one.x + one_w + 8.0, by, det_w, 40.0);
-        // Store these back for hit-testing.
-        self.add_one.render(c, one, theme);
-        self.add_detailed.render(c, det, theme);
+        self.add_one.render(c, l.add_one, theme);
+        self.add_detailed.render(c, l.add_detailed, theme);
         if self.detail_open {
-            self.render_detail(c, Rect::new(r.x + 14.0, by + 48.0, r.w - 28.0, 180.0), theme);
+            self.render_detail(c, &l, theme);
         }
     }
 
-    fn render_detail(&self, c: &mut Compositor, rect: Rect, theme: &Theme) {
-        let col = (rect.w - 10.0) / 2.0;
-        let mut y = rect.y;
-        self.detail_set
-            .render(c, Rect::new(rect.x, y, col, LabeledField::height()), theme);
-        self.detail_artist.render(
-            c,
-            Rect::new(rect.x + col + 10.0, y, col, LabeledField::height()),
-            theme,
-        );
-        y += LabeledField::height() + 8.0;
+    fn render_detail(&self, c: &mut Compositor, l: &Layout, theme: &Theme) {
+        self.detail_set.render(c, l.detail_set, theme);
+        self.detail_artist.render(c, l.detail_artist, theme);
         text(
             c,
             "Idioma",
             12.0,
             400,
-            rect.x,
-            y,
+            l.detail_lang.x,
+            l.detail_lang.y - 16.0,
             theme.colors.text_dim.0,
         );
-        self.detail_lang
-            .render(c, Rect::new(rect.x, y + 16.0, col, FIELD_H), theme);
-        self.detail_qty.render(
-            c,
-            Rect::new(rect.x + col + 10.0, y, col, LabeledField::height()),
-            theme,
-        );
-        y += LabeledField::height() + 8.0;
-        self.detail_notes
-            .render(c, Rect::new(rect.x, y, rect.w, LabeledField::height()), theme);
-        y += LabeledField::height() + 8.0;
-        let (save_w, _) = self.detail_save.preferred_size();
-        let (cancel_w, _) = self.detail_cancel.preferred_size();
-        let save = Rect::new(rect.x + rect.w - save_w, y, save_w, 40.0);
-        let cancel = Rect::new(save.x - 8.0 - cancel_w, y, cancel_w, 40.0);
-        self.detail_cancel.render(c, cancel, theme);
-        self.detail_save.render(c, save, theme);
+        self.detail_lang.render(c, l.detail_lang, theme);
+        self.detail_qty.render(c, l.detail_qty, theme);
+        self.detail_notes.render(c, l.detail_notes, theme);
+        self.detail_cancel.render(c, l.detail_cancel, theme);
+        self.detail_save.render(c, l.detail_save, theme);
     }
 }
 

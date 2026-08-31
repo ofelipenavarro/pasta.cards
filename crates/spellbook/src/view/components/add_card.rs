@@ -185,10 +185,33 @@ impl AddCardModal {
     }
 
     /// Opening asks for the decks the allocators list (the JS's `api.decks()`
-    /// before building the markup).
+    /// before building the markup). Resets the form so a previous save or
+    /// paste does not leak into the new session.
     pub fn open(&mut self, ctx: &mut ScreenCtx) {
+        self.reset();
         ctx.send(Command::ListDecks);
         self.set_focus(Some(Slot::Name), ctx);
+    }
+
+    fn reset(&mut self) {
+        self.suggestions.clear();
+        self.name_in_flight = false;
+        self.name_dirty = false;
+        self.since_name_edit = 0.0;
+        self.error = None;
+        self.saving = Save::Idle;
+        self.list_status = None;
+        self.hover_suggest = None;
+        self.tabs.active = 0;
+        self.name.set_value("");
+        self.artist.set_value("");
+        self.qty.set_value("1");
+        self.notes.set_value("");
+        self.list.set_value("");
+        self.lang.selected = 0;
+        self.deck.selected = 0;
+        self.list_deck.selected = 0;
+        self.focus = None;
     }
 
     pub fn is_saving(&self) -> bool {

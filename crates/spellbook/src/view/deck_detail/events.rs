@@ -58,7 +58,7 @@ pub(crate) fn ownership_tag(o: &spellbook_core::wizard::CardOwnership) -> (Strin
 impl super::DeckDetailScreen {
     // -- Toolbar / event routing ----------------------------------------------
 
-    fn export_menu_rect(&self, content: Rect) -> Rect {
+    pub(crate) fn export_menu_rect(&self, content: Rect) -> Rect {
         let t = self.toolbar_rects(content);
         Rect::new(t.sort.x + 150.0, t.sort.y + t.sort.h, 220.0, 78.0)
     }

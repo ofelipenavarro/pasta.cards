@@ -677,6 +677,63 @@ impl DeckDetailScreen {
             }
             return result;
         }
+        // Sort menu: open and click-through.
+        if self.sort_menu_open {
+            if let WidgetEvent::MouseDown { x, y } = *event {
+                let content = window_to_content(window);
+                let menu_r = self.sort_menu_rect(content);
+                if menu_r.contains(x, y) {
+                    for (i, mode) in SortMode::ALL.iter().enumerate() {
+                        let row = Rect::new(
+                            menu_r.x + 4.0,
+                            menu_r.y + 4.0 + i as f32 * 34.0,
+                            menu_r.w - 8.0,
+                            30.0,
+                        );
+                        if row.contains(x, y) {
+                            self.sort = *mode;
+                            self.sort_menu_open = false;
+                            return EventResult::clicked();
+                        }
+                    }
+                }
+                self.sort_menu_open = false;
+                return EventResult::changed();
+            }
+            return EventResult::IGNORED;
+        }
+        // Export menu: open and click-through.
+        if self.export_menu_open {
+            if let WidgetEvent::MouseDown { x, y } = *event {
+                let content = window_to_content(window);
+                let menu_r = self.export_menu_rect(content);
+                if menu_r.contains(x, y) {
+                    let formats = ["moxfield", "text"];
+                    for (i, fmt) in formats.iter().enumerate() {
+                        let row = Rect::new(
+                            menu_r.x + 4.0,
+                            menu_r.y + 4.0 + i as f32 * 34.0,
+                            menu_r.w - 8.0,
+                            30.0,
+                        );
+                        if row.contains(x, y) {
+                            self.export_format = Some(fmt.to_string());
+                            self.export_menu_open = false;
+                            if let Some(id) = self.deck_id {
+                                ctx.send(Command::ExportDeck {
+                                    deck_id: id,
+                                    format: fmt.to_string(),
+                                });
+                            }
+                            return EventResult::clicked();
+                        }
+                    }
+                }
+                self.export_menu_open = false;
+                return EventResult::changed();
+            }
+            return EventResult::IGNORED;
+        }
         // Open filter menu eats the event first.
         let content = window_to_content(window);
         let t = self.toolbar_rects(content);
@@ -690,6 +747,8 @@ impl DeckDetailScreen {
             || self.remove_confirm.is_some()
             || self.add_confirm.is_some()
             || self.filter_bar.is_open()
+            || self.sort_menu_open
+            || self.export_menu_open
     }
 
     /// (deck_cards.id, card name) of the row/tile under (x, y), for remove.

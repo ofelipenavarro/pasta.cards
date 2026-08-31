@@ -286,16 +286,23 @@ impl AddGameModal {
         result = result.merge(tabs_r);
 
         if let WidgetEvent::MouseDown { x, y } = *event {
-            for rect in [
-                l.played_at,
-                l.opponents,
-                l.turns,
-                l.notes,
-                l.highlights,
+            let mut clicked = false;
+            for (field, rect) in [
+                (&mut self.played_at, l.played_at),
+                (&mut self.opponents, l.opponents),
+                (&mut self.turns, l.turns),
+                (&mut self.notes, l.notes),
+                (&mut self.highlights, l.highlights),
             ] {
-                if rect.contains(x, y) {
+                let fr = field.field_rect(rect);
+                if fr.contains(x, y) {
+                    field.click(x - fr.x);
                     result = result.merge(EventResult::changed());
+                    clicked = true;
                 }
+            }
+            if clicked {
+                return (None, result);
             }
         }
 

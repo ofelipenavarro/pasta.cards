@@ -227,15 +227,14 @@ impl DecksScreen {
                 }
                 return EventResult::clicked();
             }
-            // Click outside the menu closes it.
-            if matches!(event, WidgetEvent::MouseDown { .. } | WidgetEvent::MouseUp { .. }) {
+            // Click outside the menu closes it, but only on MouseDown: the
+            // MouseUp that follows the opening click must not close it.
+            if let WidgetEvent::MouseDown { x, y } = *event {
                 let (w, h) = menu_state.menu.size();
-                if let WidgetEvent::MouseDown { x, y } | WidgetEvent::MouseUp { x, y } = *event {
-                    let r = Rect::new(menu_state.origin.0, menu_state.origin.1, w, h);
-                    if !r.contains(x, y) {
-                        self.context_menu = None;
-                        return EventResult::changed();
-                    }
+                let r = Rect::new(menu_state.origin.0, menu_state.origin.1, w, h);
+                if !r.contains(x, y) {
+                    self.context_menu = None;
+                    return EventResult::changed();
                 }
             }
             return result;

@@ -656,16 +656,25 @@ impl DeckDetailScreen {
         if self.remove_confirm.take().is_some() {
             return true;
         }
-        for modal_open in [
-            self.edit_deck_modal.is_open(),
-            self.import_deck_modal.is_open(),
-            self.delete_deck_modal.is_open(),
-        ] {
-            if modal_open {
-                return true; // each modal closes itself via handle_escape first
+        if self.edit_deck_modal.is_open() {
+            if self.edit_deck_modal.handle_escape() {
+                return true;
             }
+            self.edit_deck_modal.close();
+            return true;
         }
-        if self.edit_deck_modal.handle_escape() || self.import_deck_modal.handle_escape() || self.delete_deck_modal.handle_escape() {
+        if self.import_deck_modal.is_open() {
+            if self.import_deck_modal.handle_escape() {
+                return true;
+            }
+            self.import_deck_modal.close();
+            return true;
+        }
+        if self.delete_deck_modal.is_open() {
+            if self.delete_deck_modal.handle_escape() {
+                return true;
+            }
+            self.delete_deck_modal.close();
             return true;
         }
         false
