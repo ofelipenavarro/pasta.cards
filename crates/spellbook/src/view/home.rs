@@ -13,8 +13,13 @@
 
 use engine::compositor::{Compositor, LayerId};
 use engine::theme::{Intent, Theme};
-use engine::ui::widgets::{EmptyState, EventResult, Rect, WidgetEvent, rounded_rect};
+use engine::ui::widgets::{
+    Button, EmptyState, EventResult, Rect, WidgetEvent, rounded_rect,
+};
 use spellbook_core::client::{Command, Event, HomeData};
+
+use crate::view::components::add_card::{AddCardAnswer, AddCardModal};
+use crate::view::components::new_deck::{NewDeckAnswer, NewDeckModal};
 
 use super::{EditKey, Route, ScreenCtx, deck_tile, grid_columns, group_label, panel, text};
 use crate::art::ArtCache;
@@ -32,12 +37,20 @@ enum Hit {
     Stat(usize),
     Deck(i64),
     NewDeckTile,
+    AddCardBtn,
+    NewDeckBtn,
 }
 
 pub struct HomeScreen {
     data: Option<Box<HomeData>>,
     hover: Option<Hit>,
     loading: EmptyState,
+    /// Header buttons (the `page-header` btn row of home.js).
+    add_btn: Button,
+    new_deck_btn: Button,
+    add_card_modal: AddCardModal,
+    add_card_open: bool,
+    new_deck_modal: NewDeckModal,
 }
 
 impl HomeScreen {
@@ -50,6 +63,11 @@ impl HomeScreen {
                 "Lendo a coleção, os decks e o histórico do banco local.",
             )
             .icon("house"),
+            add_btn: Button::new("+ Adicionar Carta"),
+            new_deck_btn: Button::new("Novo Deck").variant(engine::ui::widgets::ButtonVariant::Outline),
+            add_card_modal: AddCardModal::new(&Theme::hoff()),
+            add_card_open: false,
+            new_deck_modal: NewDeckModal::new(&Theme::hoff()),
         }
     }
 
@@ -58,39 +76,73 @@ impl HomeScreen {
     }
 
     pub fn on_event(&mut self, event: &Event, ctx: &mut ScreenCtx) -> bool {
+        // Modais primeiro: DeckAdded/CardsFound etc. pertencem a eles.
+        let mut changed = self.on_modal_event(event, ctx);
+
         let Event::HomeLoaded(result) = event else {
-            return false;
+            return changed;
         };
-        
+
         match result {
             Ok(data) => {
                 // The shell re-enters the route on navigation, which reloads;
                 // here we only store what arrived.
                 self.data = Some(data.clone());
-                true
+                changed = true;
             }
             Err(e) => {
                 ctx.toast(e.detail().to_string(), Intent::Destructive);
-                true
+                changed = true;
             }
         }
+        changed
     }
 
-    /// Nothing on the dashboard takes text yet - the search fields live on
-    /// the data screens.
-    pub fn handle_text(&mut self, _s: &str, _ctx: &mut ScreenCtx) -> bool {
+    pub fn handle_text(&mut self, s: &str, _ctx: &mut ScreenCtx) -> bool {
+        if self.add_card_open {
+            return self.add_card_modal.handle_text(s);
+        }
+        if self.new_deck_modal.is_open() {
+            return self.new_deck_modal.handle_text(s);
+        }
         false
     }
 
-    pub fn handle_edit_key(&mut self, _key: EditKey, _ctx: &mut ScreenCtx) -> bool {
+    pub fn handle_edit_key(&mut self, key: EditKey, ctx: &mut ScreenCtx) -> bool {
+        if self.add_card_open {
+            return self.add_card_modal.handle_edit_key(key, ctx).changed;
+        }
+        if self.new_deck_modal.is_open() {
+            return self.new_deck_modal.handle_edit_key(key, ctx).changed;
+        }
         false
     }
 
     pub fn handle_escape(&mut self) -> bool {
+        if self.add_card_open {
+            if self.add_card_modal.handle_escape() {
+                return true;
+            }
+            self.add_card_open = false;
+            return true;
+        }
+        if self.new_deck_modal.is_open() {
+            if self.new_deck_modal.handle_escape() {
+                return true;
+            }
+            self.new_deck_modal.close();
+            return true;
+        }
         false
     }
 
-    pub fn tick(&mut self, _dt: f32) -> bool {
+    pub fn tick(&mut self, _dt: f32, ctx: &mut ScreenCtx) -> bool {
+        if self.add_card_open {
+            return self.add_card_modal.tick(_dt, ctx);
+        }
+        if self.new_deck_modal.is_open() {
+            return self.new_deck_modal.tick(_dt, ctx);
+        }
         false
     }
 
@@ -195,28 +247,59 @@ impl HomeScreen {
     /// Whether a modal or menu is open over the page. While `true` the shell
     /// routes pointer events here first via `handle_overlay_event`.
     pub fn overlay_open(&self) -> bool {
-        false
+        self.add_card_open || self.new_deck_modal.is_open()
     }
 
     /// Pointer event while an overlay is open.
     pub fn handle_overlay_event(
         &mut self,
-        _event: &WidgetEvent,
-        _window: Rect,
-        _ctx: &mut ScreenCtx,
+        event: &WidgetEvent,
+        window: Rect,
+        ctx: &mut ScreenCtx,
     ) -> EventResult {
+        if self.add_card_open {
+            let (answer, result) = self.add_card_modal.handle_event(event, window, ctx);
+            match answer {
+                Some(AddCardAnswer::Saved) => {
+                    self.add_card_open = false;
+                    ctx.toast("Carta adicionada à coleção.", Intent::Constructive);
+                    ctx.send(Command::LoadHome);
+                }
+                Some(AddCardAnswer::Cancelled) => self.add_card_open = false,
+                None => {}
+            }
+            return result;
+        }
+        if self.new_deck_modal.is_open() {
+            let (answer, result) = self.new_deck_modal.handle_event(event, window, ctx);
+            match answer {
+                Some(NewDeckAnswer::Created(id)) => {
+                    self.new_deck_modal.close();
+                    ctx.navigate(Route::Deck(id));
+                    ctx.send(Command::LoadHome);
+                }
+                Some(NewDeckAnswer::Cancelled) => self.new_deck_modal.close(),
+                None => {}
+            }
+            return result;
+        }
         EventResult::IGNORED
     }
 
     /// Modals and menus, drawn over the whole window after the content clip.
     pub fn render_overlay(
         &mut self,
-        _c: &mut Compositor,
-        _layer: LayerId,
-        _window: Rect,
-        _theme: &Theme,
+        c: &mut Compositor,
+        layer: LayerId,
+        window: Rect,
+        theme: &Theme,
         _art: &mut ArtCache,
     ) {
+        if self.add_card_open {
+            self.add_card_modal.render(c, layer, window, theme);
+        } else if self.new_deck_modal.is_open() {
+            self.new_deck_modal.render(c, layer, window, theme);
+        }
     }
 
     pub fn content_height(&self, content: Rect) -> f32 {
@@ -229,7 +312,24 @@ impl HomeScreen {
         (bottom - content.y).max(content.h)
     }
 
+    /// The two header buttons, top-right (the page-header btn row).
+    fn header_btn_rects(&self, content: Rect) -> (Rect, Rect) {
+        let (aw, ah) = self.add_btn.preferred_size();
+        let (nw, nh) = self.new_deck_btn.preferred_size();
+        let y = content.y - 58.0; // header row sits above the stats
+        let add = Rect::new(content.x + content.w - aw - nw - 10.0, y, aw, ah);
+        let new_deck = Rect::new(content.x + content.w - nw, y, nw, nh);
+        (add, new_deck)
+    }
+
     fn hit_at(&self, x: f32, y: f32, content: Rect) -> Option<Hit> {
+        let (add, new_deck) = self.header_btn_rects(content);
+        if add.contains(x, y) {
+            return Some(Hit::AddCardBtn);
+        }
+        if new_deck.contains(x, y) {
+            return Some(Hit::NewDeckBtn);
+        }
         for (i, rect) in self.stat_rects(content).iter().enumerate() {
             if rect.contains(x, y) {
                 return Some(Hit::Stat(i));
@@ -283,7 +383,16 @@ impl HomeScreen {
                     EventResult::clicked()
                 }
                 Some(Hit::NewDeckTile) => {
-                    ctx.navigate(Route::Decks);
+                    self.new_deck_modal.open(ctx);
+                    EventResult::clicked()
+                }
+                Some(Hit::AddCardBtn) => {
+                    self.add_card_open = true;
+                    self.add_card_modal.open(ctx);
+                    EventResult::clicked()
+                }
+                Some(Hit::NewDeckBtn) => {
+                    self.new_deck_modal.open(ctx);
                     EventResult::clicked()
                 }
                 None => EventResult::IGNORED,
@@ -306,6 +415,11 @@ impl HomeScreen {
             self.loading.render(c, content, theme);
             return;
         };
+
+        // Header buttons (home.js's page-header btn row).
+        let (add_rect, new_deck_rect) = self.header_btn_rects(content);
+        self.add_btn.render(c, add_rect, theme);
+        self.new_deck_btn.render(c, new_deck_rect, theme);
 
         // Stat cards.
         let total_cards: i64 = data.decks.iter().map(|d| d.total_cards).sum();
@@ -433,6 +547,7 @@ impl HomeScreen {
                     );
                 }
                 Hit::Stat(_) => unreachable!("deck layout never yields stat hits"),
+                Hit::AddCardBtn | Hit::NewDeckBtn => unreachable!("header buttons are not tiles"),
             }
         }
 
@@ -497,4 +612,19 @@ fn format_ts(ts: &str) -> String {
     };
     let hm: String = time.chars().take(5).collect();
     format!("{d}/{m} {hm}")
+}
+
+impl HomeScreen {
+    /// Worker answers the two modals need (decks for allocation, search
+    /// results for autocomplete, the save answers).
+    pub fn on_modal_event(&mut self, event: &Event, ctx: &mut ScreenCtx) -> bool {
+        let mut changed = false;
+        if self.add_card_open {
+            changed |= self.add_card_modal.on_event(event, ctx);
+        }
+        if self.new_deck_modal.is_open() {
+            changed |= self.new_deck_modal.on_event(event, ctx);
+        }
+        changed
+    }
 }

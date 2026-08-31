@@ -16,7 +16,6 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          # Fetch full history for git operations
           fetch-depth: 0
 
       # --- Set up Python ---
@@ -29,16 +28,16 @@ jobs:
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install sentence-transformers
+          pip install sentence-transformers open_clip_torch ftfy regex tqdm Pillow numpy maturin
 
       # --- Install nest Python bindings ---
       - name: Install nest Python module
         run: |
-          pip install maturin
-          cd crates/nest/crates/nest-python
-          maturin develop --skip-auditwheel
+          cd crates/nest
+          cargo build --release -p nest-python
+          cp target/release/lib_nest.dylib python/_nest.so
 
-      # --- Update mtg.sqlite from Scryfall if needed ---
+      # --- Update mtg.sqlite from Scryfall ---
       - name: Update card database from Scryfall
         id: update_db
         run: |
@@ -49,214 +48,181 @@ jobs:
           
           mkdir -p "$DATA_DIR"
           
-          # Check if we already have a valid database
-          if [ -f "$DB_PATH" ]; then
-            echo "Existing database found, checking validity..."
-            python3 -c "
-import sqlite3
-try:
-    conn = sqlite3.connect('$DB_PATH')
-    cursor = conn.cursor()
-    cursor.execute('SELECT COUNT(*) FROM cards')
-    count = cursor.fetchone()[0]
-    print(f'Database valid: {count} cards')
-    conn.close()
-except Exception as e:
-    print(f'Database invalid: {e}')
-    exit(1)
-"
-            if [ $? -eq 0 ]; then
-              echo "db_updated=false" >> "$GITHUB_OUTPUT"
-              echo "Using existing database"
-              exit 0
-            fi
-          fi
-          
           echo "Downloading oracle cards from Scryfall..."
+          curl -L -s -o "${DATA_DIR}/oracle-cards.jsonl.gz.part" "https://data.scryfall.io/oracle-cards/oracle-cards.jsonl.gz"
+          mv "${DATA_DIR}/oracle-cards.jsonl.gz.part" "${DATA_DIR}/oracle-cards.jsonl.gz"
           
-          # Download oracle_cards JSONL
-          OCI_URL="https://data.scryfall.io/oracle-cards/oracle-cards.jsonl.gz"
-          TMP_PART="${DATA_DIR}/oracle-cards.jsonl.gz.part"
-          TMP_GZ="${DATA_DIR}/oracle-cards.jsonl.gz"
+          echo "Downloading all cards from Scryfall..."
+          curl -L -s -o "${DATA_DIR}/all-cards.jsonl.gz.part" "https://data.scryfall.io/all-cards/all-cards.jsonl.gz"
+          mv "${DATA_DIR}/all-cards.jsonl.gz.part" "${DATA_DIR}/all-cards.jsonl.gz"
           
-          curl -L -s -o "${TMP_PART}" "${OCI_URL}"
-          mv "${TMP_PART}" "${TMP_GZ}"
+          python3 - << 'PYEOF'
+          import sqlite3, gzip, json, os
           
-          # Download all_cards JSONL  
-          AC_URL="https://data.scryfall.io/all-cards/all-cards.jsonl.gz"
-          TMP_PART2="${DATA_DIR}/all-cards.jsonl.gz.part"
-          TMP_GZ2="${DATA_DIR}/all-cards.jsonl.gz"
+          data_dir = os.environ.get('DATA_DIR', './data')
+          db_path = os.path.join(data_dir, 'mtg.sqlite')
+          oracle_path = os.path.join(data_dir, 'oracle-cards.jsonl.gz')
+          all_path = os.path.join(data_dir, 'all-cards.jsonl.gz')
           
-          curl -L -s -o "${TMP_PART2}" "${AC_URL}"
-          mv "${TMP_PART2}" "${TMP_GZ2}"
+          if os.path.exists(db_path):
+              os.remove(db_path)
           
-          # Build SQLite index (simplified)
-          python3 -c "
-import sqlite3, gzip, json, os, glob
-
-data_dir = '$DATA_DIR'
-
-# Read oracle cards and build index
-oracle_path = os.path.join(data_dir, 'oracle-cards.jsonl.gz')
-all_path = os.path.join(data_dir, 'all-cards.jsonl.gz')
-
-# Create simplified mtg.sqlite
-db_path = os.path.join(data_dir, 'mtg.sqlite')
-if os.path.exists(db_path):
-    os.remove(db_path)
-
-conn = sqlite3.connect(db_path)
-cursor = conn.cursor()
-
-cursor.execute('''
-    CREATE TABLE cards (
-        oracle_id INTEGER PRIMARY KEY,
-        name TEXT NOT NULL,
-        mana_cost TEXT,
-        cmc INTEGER,
-        type_line TEXT,
-        oracle_text TEXT,
-        power TEXT,
-        toughness TEXT,
-        loyalty TEXT,
-        colors TEXT,
-        color_identity TEXT,
-        rarity TEXT,
-        set_code TEXT,
-        keywords TEXT,
-        commander_legal INTEGER,
-        uri TEXT,
-        image_uri TEXT,
-        layout TEXT,
-        image_uri_back TEXT,
-        edhrec_rank INTEGER,
-        name_folded TEXT,
-        game_changer INTEGER
-    )
-''')
-
-# Process oracle-cards.jsonl.gz
-count = 0
-with gzip.open(oracle_path, 'rt', encoding='utf-8') as f:
-    for line in f:
-        try:
-            card = json.loads(line)
-            oracle_id = card.get('oracle_id')
-            if not oracle_id:
-                continue
-            
-            cursor.execute('''
-                INSERT OR REPLACE INTO cards 
-                (oracle_id, name, mana_cost, cmc, type_line, oracle_text, power, toughness, loyalty,
-                 colors, color_identity, rarity, set_code, keywords, commander_legal, uri, image_uri,
-                 layout, image_uri_back, edhrec_rank, name_folded, game_changer)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (
-                oracle_id,
-                card.get('name'),
-                card.get('mana_cost'),
-                card.get('cmc'),
-                card.get('type_line'),
-                card.get('oracle_text'),
-                card.get('power'),
-                card.get('toughness'),
-                card.get('loyalty'),
-                card.get('colors'),
-                card.get('color_identity'),
-                card.get('rarity'),
-                card.get('set_code'),
-                card.get('keywords'),
-                1 if card.get('commander_legal') else 0,
-                card.get('uri'),
-                card.get('image_uri'),
-                card.get('layout'),
-                card.get('image_uri_back'),
-                1 if card.get('edhrec_rank') else 0,
-                card.get('name_folded'),
-                1 if card.get('game_changer') else 0
-            ))
-            count += 1
-        except Exception:
-            continue
-
-conn.commit()
-conn.close()
-print(f'Built mtg.sqlite with {count} cards from oracle')
-"
-
-          # Process all-cards for Portuguese names
-          python3 -c "
-import sqlite3, gzip, json, os
-
-data_dir = '$DATA_DIR'
-db_path = os.path.join(data_dir, 'mtg.sqlite')
-all_path = os.path.join(data_dir, 'all-cards.jsonl.gz')
-
-conn = sqlite3.connect(db_path)
-cursor = conn.cursor()
-
-# Add Portuguese names from all-cards
-pt_names = set()
-with gzip.open(all_path, 'rt', encoding='utf-8') as f:
-    for line in f:
-        try:
-            card = json.loads(line)
-            names = card.get('name', '')
-            lang = card.get('lang')
-            set_code = card.get('set_code')
-            if lang == 'pt' and names:
-                pt_names.add((names, set_code, card.get('oracle_id')))
-        except Exception:
-            continue
-
-# Insert Portuguese name mappings
-for name, set_code, oracle_id in pt_names:
-    try:
-        cursor.execute('''
-            INSERT OR IGNORE INTO names_localized (printed_name, oracle_id, set_code, printed_name_folded, lang, lang_rank)
-            VALUES (?, ?, ?, ?, 'pt', 1)
-        ''', (name, oracle_id, set_code))
-    except Exception:
-        continue
-
-conn.commit()
-conn.close()
-print(f'Processed Portuguese names: {len(pt_names)} entries')
-"
-
-          # Verify the database was created
-          if [ -f "$DB_PATH" ]; then
-            python3 -c "
-import sqlite3
-conn = sqlite3.connect('$DB_PATH')
-cursor = conn.cursor()
-cursor.execute('SELECT COUNT(*) FROM cards')
-count = cursor.fetchone()[0]
-print(f'Database successfully updated: {count} cards')
-conn.close()
-"
-            echo "db_updated=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "db_updated=false" >> "$GITHUB_OUTPUT"
-            echo "WARNING: Database not created, proceeding with existing or empty state"
-          fi
+          conn = sqlite3.connect(db_path)
+          cursor = conn.cursor()
+          
+          cursor.execute('''
+              CREATE TABLE cards (
+                  oracle_id TEXT PRIMARY KEY,
+                  name TEXT,
+                  mana_cost TEXT,
+                  cmc REAL,
+                  type_line TEXT,
+                  oracle_text TEXT,
+                  power TEXT,
+                  toughness TEXT,
+                  loyalty TEXT,
+                  colors TEXT,
+                  color_identity TEXT,
+                  rarity TEXT,
+                  set_code TEXT,
+                  keywords TEXT,
+                  commander_legal TEXT,
+                  price_usd TEXT,
+                  reserved INTEGER,
+                  edhrec_rank INTEGER,
+                  uri TEXT,
+                  image_uri TEXT,
+                  game_changer INTEGER,
+                  name_folded TEXT,
+                  layout TEXT,
+                  image_uri_back TEXT
+              )
+          ''')
+          
+          # Also store localized names (Portuguese + others) from all_cards
+          cursor.execute('''
+              CREATE TABLE names_localized (
+                  oracle_id TEXT,
+                  lang TEXT,
+                  printed_name TEXT,
+                  set_code TEXT,
+                  PRIMARY KEY (oracle_id, lang, set_code)
+              )
+          ''')
+          
+          count = 0
+          with gzip.open(oracle_path, 'rt', encoding='utf-8') as f:
+              for line in f:
+                  try:
+                      card = json.loads(line)
+                      oracle_id = card.get('oracle_id')
+                      if not oracle_id:
+                          continue
+                      
+                      image_uris = card.get('image_uris') or {}
+                      image_uri = image_uris.get('normal') or image_uris.get('large') or card.get('image_uri')
+                      
+                      cursor.execute('''
+                          INSERT OR REPLACE INTO cards 
+                          (oracle_id, name, mana_cost, cmc, type_line, oracle_text, power, toughness, loyalty,
+                           colors, color_identity, rarity, set_code, keywords, commander_legal, price_usd,
+                           reserved, edhrec_rank, uri, image_uri, game_changer, name_folded, layout, image_uri_back)
+                          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                      ''', (
+                          oracle_id,
+                          card.get('name'),
+                          card.get('mana_cost'),
+                          card.get('cmc'),
+                          card.get('type_line'),
+                          card.get('oracle_text'),
+                          card.get('power'),
+                          card.get('toughness'),
+                          card.get('loyalty'),
+                          json.dumps(card.get('colors')) if card.get('colors') else None,
+                          json.dumps(card.get('color_identity')) if card.get('color_identity') else None,
+                          card.get('rarity'),
+                          card.get('set_code'),
+                          json.dumps(card.get('keywords')) if card.get('keywords') else None,
+                          json.dumps(card.get('legalities')) if card.get('legalities') else None,
+                          card.get('prices', {}).get('usd'),
+                          1 if card.get('reserved') else 0,
+                          card.get('edhrec_rank'),
+                          card.get('uri'),
+                          image_uri,
+                          1 if card.get('game_changer') else 0,
+                          card.get('name_folded'),
+                          card.get('layout'),
+                          (card.get('card_faces') or [{}])[1].get('image_uris', {}).get('normal') if card.get('card_faces') and len(card.get('card_faces')) > 1 else None
+                      ))
+                      count += 1
+                  except Exception:
+                      continue
+          
+          conn.commit()
+          
+          # Process all-cards for localized names
+          pt_count = 0
+          localized = {}
+          with gzip.open(all_path, 'rt', encoding='utf-8') as f:
+              for line in f:
+                  try:
+                      card = json.loads(line)
+                      oracle_id = card.get('oracle_id')
+                      lang = card.get('lang')
+                      printed_name = card.get('printed_name') or card.get('name')
+                      set_code = card.get('set_code')
+                      if oracle_id and lang and printed_name and set_code:
+                          key = (oracle_id, lang, set_code)
+                          if key not in localized:
+                              localized[key] = printed_name
+                  except Exception:
+                      continue
+          
+          for (oracle_id, lang, set_code), printed_name in localized.items():
+              cursor.execute('''
+                  INSERT OR REPLACE INTO names_localized (oracle_id, lang, printed_name, set_code)
+                  VALUES (?, ?, ?, ?)
+              ''', (oracle_id, lang, printed_name, set_code))
+              if lang == 'pt':
+                  pt_count += 1
+          
+          conn.commit()
+          
+          cursor.execute('SELECT COUNT(*) FROM cards')
+          card_count = cursor.fetchone()[0]
+          cursor.execute('SELECT COUNT(*) FROM names_localized WHERE lang = ?', ('pt',))
+          pt_total = cursor.fetchone()[0]
+          conn.close()
+          
+          print(f'Built mtg.sqlite: {card_count} cards, {len(localized)} localized names, {pt_count} Portuguese')
+          
+          with open(os.environ.get('GITHUB_OUTPUT', '/dev/null'), 'a') as f:
+              f.write(f'db_updated=true\n')
+              f.write(f'card_count={card_count}\n')
+      env:
+        DATA_DIR: ./data
 
       # --- Build .nest file from database ---
       - name: Build .nest file from database
-        if: steps.update_db.outputs.db_updated == 'true' || !steps.update_db.outputs.db_updated
+        id: nest_build
         run: |
-          echo "=== Building .nest file ==="
+          echo "=== Building multimodal .nest file ==="
           
-          # Ensure data directory exists and has mtg.sqlite
-          ls -la data/mtg.sqlite 2>/dev/null || echo "No mtg.sqlite in data dir, checking..."
+          # Allow downloads on first run so open_clip can fetch CLIP weights
+          export NEST_ALLOW_DOWNLOAD=1
+          export HF_HUB_OFFLINE=0
+          export TRANSFORMERS_OFFLINE=0
+          export HF_DATASETS_OFFLINE=0
           
-          # Run the build script - output to data/dataset/cards/ as requested
-          python3 scripts/build_nest.py "data/mtg.sqlite" "data/dataset/cards/corpus.nest"
+          # Make sure nest python tooling is importable
+          export PYTHONPATH="${PYTHONPATH}:$(pwd)/crates/nest/python"
+          
+          python3 scripts/build_nest_multimodal.py "data/mtg.sqlite" "data/dataset/cards/corpus.nest"
           echo "nest_built=true" >> "$GITHUB_OUTPUT"
 
       # --- Commit .nest file back to repository ---
       - name: Commit .nest file
-        if: steps.update_db.outputs.db_updated == 'true' && steps.nest_build.outputs.nest_built == 'true'
+        if: steps.nest_build.outputs.nest_built == 'true'
         run: |
           echo "=== Committing .nest file ==="
           
@@ -265,7 +231,6 @@ conn.close()
           
           git add data/dataset/cards/corpus.nest
           
-          # Check if there are changes to commit
           if git diff --cached --quiet; then
             echo "No changes to commit - corpus.nest is up to date"
           else
@@ -281,5 +246,5 @@ conn.close()
         run: |
           echo "=== Daily nest update workflow completed ==="
           echo "Database updated: ${{ steps.update_db.outputs.db_updated }}"
+          echo "Cards: ${{ steps.update_db.outputs.card_count }}"
           echo "Nest built: ${{ steps.nest_build.outputs.nest_built }}"
-          echo "Changes pushed: conditional on git push success"

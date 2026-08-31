@@ -244,7 +244,7 @@ pub(crate) const TILE_MIN_W: f32 = 150.0;
 pub(crate) const TILE_MAX_W: f32 = 236.0;
 pub(crate) const ROW_H: f32 = 34.0;
 
-mod events;
+pub(crate) mod events;
 mod groups;
 mod layout;
 mod render;
@@ -747,3 +747,10 @@ pub(crate) const CHIP_GAP: f32 = 8.0;
 pub(crate) const GROUP_LABEL_H: f32 = 30.0;
 pub(crate) const STAT_PANEL_H: f32 = 190.0;
 
+
+
+/// Public re-export: the confirm dialog's button rects, shared by the
+/// wishlist's "tirar da wishlist?" dialog.
+pub fn pub_confirm_buttons(window: Rect) -> (Rect, Rect) {
+    events::confirm_buttons(window)
+}

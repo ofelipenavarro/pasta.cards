@@ -40,6 +40,8 @@ use crate::art::ArtCache;
 /// Sidebar rail width. The one horizontal constant the layout is allowed:
 /// every content width below derives from `width - SIDEBAR_W`.
 pub const SIDEBAR_W: f32 = 248.0;
+/// Collapsed rail width — the CSS's 64px icon strip.
+pub const SIDEBAR_COLLAPSED_W: f32 = 64.0;
 const PAD: f32 = 40.0;
 /// Vertical space used by the screen header (title + blurb).
 const HEADER_H: f32 = 78.0;
@@ -209,6 +211,13 @@ pub struct SpellbookView {
     actions: Vec<ScreenAction>,
 
     sidebar_hover: Option<usize>,
+    /// True while the pointer is over the rail — the CSS's `:hover`.
+    /// Everything content-side derives from [`Self::sidebar_width`].
+    sidebar_expanded: bool,
+    /// Decks sub-list under "Meus Decks" (the router.js subitems), visible
+    /// only while the decks section is the one being browsed.
+    sidebar_decks: Vec<spellbook_core::ops::decks::DeckSummary>,
+    sidebar_sublist_hover: Option<usize>,
     sidebar_scroll: ScrollState,
     /// Page-level vertical scroll, one per route: these screens are taller
     /// than the window, and each keeps its own position.
@@ -224,6 +233,7 @@ pub struct SpellbookView {
 
     home: home::HomeScreen,
     decks: decks::DecksScreen,
+    deck_detail: deck_detail::DeckDetailScreen,
     collection: collection::CollectionScreen,
     wishlist: wishlist::WishlistScreen,
     scanner: scanner::ScannerScreen,
@@ -245,6 +255,7 @@ impl SpellbookView {
         let collection = collection::CollectionScreen::new(&theme);
         let wishlist = wishlist::WishlistScreen::new(&theme);
         let games = games::GamesScreen::new(&theme);
+        let deck_detail = deck_detail::DeckDetailScreen::new(&theme);
         Self {
             width,
             height,
@@ -255,6 +266,9 @@ impl SpellbookView {
             art: ArtCache::new(),
             actions: Vec::new(),
             sidebar_hover: None,
+            sidebar_expanded: false,
+            sidebar_decks: Vec::new(),
+            sidebar_sublist_hover: None,
             sidebar_scroll: ScrollState::new(),
             page_scroll: std::array::from_fn(|_| ScrollState::new()),
             toasts: ToastManager::new(),
@@ -263,6 +277,7 @@ impl SpellbookView {
             layers: None,
             home: home::HomeScreen::new(),
             decks: decks::DecksScreen::new(),
+            deck_detail,
             collection,
             wishlist,
             scanner: scanner::ScannerScreen::new(),
@@ -276,14 +291,20 @@ impl SpellbookView {
         self.scale_factor = scale_factor;
     }
 
+    /// Current rail width: 64 collapsed, 248 on hover — `style.css`'s
+    /// `.sidebar { width: 64px }` + `.sidebar:hover { width: 220px }`.
+    pub fn sidebar_width(&self) -> f32 {
+        if self.sidebar_expanded { SIDEBAR_W } else { SIDEBAR_COLLAPSED_W }
+    }
+
     /// Content area to the right of the rail, below the header. Derived from
     /// the window, never from a fixed page width - the CSS this replaces
     /// capped the layout at 1400px and left the rest of a wide display empty.
     pub fn content_rect(&self) -> Rect {
         Rect::new(
-            SIDEBAR_W + PAD,
+            self.sidebar_width() + PAD,
             PAD + HEADER_H,
-            (self.width - SIDEBAR_W - PAD * 2.0).max(200.0),
+            (self.width - self.sidebar_width() - PAD * 2.0).max(200.0),
             (self.height - PAD * 2.0 - HEADER_H).max(120.0),
         )
     }
@@ -300,7 +321,8 @@ impl SpellbookView {
     fn content_height(&self, content: Rect) -> f32 {
         match self.route {
             Route::Home => self.home.content_height(content),
-            Route::Decks | Route::Deck(_) => self.decks.content_height(content),
+            Route::Decks => self.decks.content_height(content),
+            Route::Deck(_) => self.deck_detail.content_height(content),
             Route::Collection => self.collection.content_height(content),
             Route::Wishlist => self.wishlist.content_height(content),
             Route::Scanner => self.scanner.content_height(content),
@@ -343,7 +365,8 @@ impl SpellbookView {
         };
         match self.route {
             Route::Home => self.home.on_enter(self.route, &mut ctx),
-            Route::Decks | Route::Deck(_) => self.decks.on_enter(self.route, &mut ctx),
+            Route::Decks => self.decks.on_enter(self.route, &mut ctx),
+            Route::Deck(_) => self.deck_detail.on_enter(self.route, &mut ctx),
             Route::Collection => self.collection.on_enter(self.route, &mut ctx),
             Route::Wishlist => self.wishlist.on_enter(self.route, &mut ctx),
             Route::Scanner => self.scanner.on_enter(self.route, &mut ctx),
@@ -378,6 +401,17 @@ impl SpellbookView {
             return true;
         }
 
+        // Sidebar deck sub-list (the router.js nav-decks-list).
+        if let Event::DecksListed(decks) = event {
+            self.sidebar_decks = decks.clone();
+        }
+
+        // When the route enters the decks section with the sub-list empty,
+        // load it (mirrors navigate()'s renderNavDecksList call).
+        if self.route.in_decks_section() && self.sidebar_decks.is_empty() {
+            self.tx.send(Command::ListDecks).ok();
+        }
+
         // A finished data update means art that was missing all session may
         // now be on disk - the misses get another chance.
         if let Event::UpdateStatusLoaded(status) = event
@@ -395,6 +429,7 @@ impl SpellbookView {
             changed |= self.data_panel.on_event(event, &mut ctx);
             changed |= self.home.on_event(event, &mut ctx);
             changed |= self.decks.on_event(event, &mut ctx);
+            changed |= self.deck_detail.on_event(event, &mut ctx);
             changed |= self.collection.on_event(event, &mut ctx);
             changed |= self.wishlist.on_event(event, &mut ctx);
             changed |= self.scanner.on_event(event, &mut ctx);
@@ -448,7 +483,8 @@ impl SpellbookView {
             };
             let overlay_result = match self.route {
                 Route::Home => self.home.handle_overlay_event(event, window_rect, &mut ctx),
-                Route::Decks | Route::Deck(_) => self.decks.handle_overlay_event(event, window_rect, &mut ctx),
+                Route::Decks => self.decks.handle_overlay_event(event, window_rect, &mut ctx),
+                Route::Deck(_) => self.deck_detail.handle_overlay_event(event, window_rect, &mut ctx),
                 Route::Collection => self.collection.handle_overlay_event(event, window_rect, &mut ctx),
                 Route::Wishlist => self.wishlist.handle_overlay_event(event, window_rect, &mut ctx),
                 Route::Scanner => self.scanner.handle_overlay_event(event, window_rect, &mut ctx),
@@ -475,7 +511,7 @@ impl SpellbookView {
         // underneath it must not receive them.
         let viewport = self.content_rect();
         if let WidgetEvent::MouseDown { x, y } = *event
-            && x >= SIDEBAR_W
+            && x >= self.sidebar_width()
             && y < viewport.y
         {
             return result.changed;
@@ -489,7 +525,8 @@ impl SpellbookView {
             };
             match self.route {
                 Route::Home => self.home.handle_event(event, content, &mut ctx),
-                Route::Decks | Route::Deck(_) => self.decks.handle_event(event, content, &mut ctx),
+                Route::Decks => self.decks.handle_event(event, content, &mut ctx),
+                Route::Deck(_) => self.deck_detail.handle_event(event, content, &mut ctx),
                 Route::Collection => self.collection.handle_event(event, content, &mut ctx),
                 Route::Wishlist => self.wishlist.handle_event(event, content, &mut ctx),
                 Route::Scanner => self.scanner.handle_event(event, content, &mut ctx),
@@ -504,7 +541,7 @@ impl SpellbookView {
         if let WidgetEvent::Scroll { x, delta, .. } = *event
             && !result.handled
         {
-            if x < SIDEBAR_W {
+            if x < self.sidebar_width() {
                 self.sync_sidebar_scroll();
                 let old = self.sidebar_scroll.offset();
                 self.sidebar_scroll.scroll_by(delta);
@@ -535,7 +572,8 @@ impl SpellbookView {
             };
             match self.route {
                 Route::Home => self.home.handle_text(s, &mut ctx),
-                Route::Decks | Route::Deck(_) => self.decks.handle_text(s, &mut ctx),
+                Route::Decks => self.decks.handle_text(s, &mut ctx),
+                Route::Deck(_) => self.deck_detail.handle_text(s, &mut ctx),
                 Route::Collection => self.collection.handle_text(s, &mut ctx),
                 Route::Wishlist => self.wishlist.handle_text(s, &mut ctx),
                 Route::Scanner => self.scanner.handle_text(s, &mut ctx),
@@ -555,7 +593,8 @@ impl SpellbookView {
             };
             match self.route {
                 Route::Home => self.home.handle_edit_key(key, &mut ctx),
-                Route::Decks | Route::Deck(_) => self.decks.handle_edit_key(key, &mut ctx),
+                Route::Decks => self.decks.handle_edit_key(key, &mut ctx),
+                Route::Deck(_) => self.deck_detail.handle_edit_key(key, &mut ctx),
                 Route::Collection => self.collection.handle_edit_key(key, &mut ctx),
                 Route::Wishlist => self.wishlist.handle_edit_key(key, &mut ctx),
                 Route::Scanner => self.scanner.handle_edit_key(key, &mut ctx),
@@ -571,7 +610,8 @@ impl SpellbookView {
     pub fn handle_escape(&mut self) -> bool {
         match self.route {
             Route::Home => self.home.handle_escape(),
-            Route::Decks | Route::Deck(_) => self.decks.handle_escape(),
+            Route::Decks => self.decks.handle_escape(),
+            Route::Deck(_) => self.deck_detail.handle_escape(),
             Route::Collection => self.collection.handle_escape(),
             Route::Wishlist => self.wishlist.handle_escape(),
             Route::Scanner => self.scanner.handle_escape(),
@@ -585,7 +625,7 @@ impl SpellbookView {
         Rect::new(
             0.0,
             SIDEBAR_TOP,
-            SIDEBAR_W,
+            self.sidebar_width(),
             (self.height - SIDEBAR_TOP - SIDEBAR_FOOTER_H).max(NAV_H),
         )
     }
@@ -606,14 +646,51 @@ impl SpellbookView {
                 Rect::new(
                     12.0,
                     SIDEBAR_TOP + i as f32 * (NAV_H + 4.0) - offset,
-                    SIDEBAR_W - 24.0,
+                    self.sidebar_width() - 24.0,
                     NAV_H,
                 )
             })
             .collect()
     }
 
+    /// The deck sub-list (router.js's nav-decks-list): shown only while the
+    /// decks section is the one being browsed, and only when expanded.
+    fn sidebar_sublist_visible(&self) -> bool {
+        self.route.in_decks_section() && self.sidebar_expanded && !self.sidebar_decks.is_empty()
+    }
+
+    /// (deck id, rect) per sub-list entry, stacked below "Meus Decks".
+    fn sidebar_sublist_rects(&self) -> Vec<(i64, Rect)> {
+        if !self.sidebar_sublist_visible() {
+            return Vec::new();
+        }
+        let decks_link = self.sidebar_item_rects()[1];
+        let mut y = decks_link.y + decks_link.h + 2.0;
+        let w = self.sidebar_width() - 48.0;
+        self.sidebar_decks
+            .iter()
+            .map(|d| {
+                let r = Rect::new(30.0, y, w, 30.0);
+                y += 30.0 + 2.0;
+                (d.id, r)
+            })
+            .collect()
+    }
+
     fn handle_sidebar(&mut self, event: &WidgetEvent) -> EventResult {
+        // Hover expands the rail (the CSS transition's pointer equivalent).
+        if let WidgetEvent::MouseMove { x, y } = *event {
+            let was = self.sidebar_expanded;
+            self.sidebar_expanded = x < SIDEBAR_W;
+            if was != self.sidebar_expanded {
+                // Width change reflows everything; load the deck sub-list
+                // when the decks section opens expanded.
+                if self.route.in_decks_section() && self.sidebar_decks.is_empty() {
+                    self.tx.send(Command::ListDecks).ok();
+                }
+                return EventResult::clicked();
+            }
+        }
         // Data panel button (footer band) — click handling first, its rect
         // overlaps nothing.
         if let WidgetEvent::MouseDown { .. } = *event {
@@ -647,23 +724,33 @@ impl SpellbookView {
                     EventResult::IGNORED
                 }
             }
-            WidgetEvent::MouseDown { x, y } => match hit(x, y) {
-                Some(i) => {
-                    let target = Route::NAV[i];
-                    // Clicking "Meus Decks" while inside a deck goes back to
-                    // the grid; clicking the link you are already on is a
-                    // no-op that still swallows the click.
-                    if target != self.route {
-                        self.navigate(target);
+            WidgetEvent::MouseDown { x, y } => {
+                // Deck sub-list first: it sits below "Meus Decks" and owns
+                // its band.
+                for (id, r) in self.sidebar_sublist_rects() {
+                    if r.contains(x, y) {
+                        self.navigate(Route::Deck(id));
                         return EventResult::clicked();
                     }
-                    EventResult {
-                        handled: true,
-                        ..EventResult::IGNORED
-                    }
                 }
-                None => EventResult::IGNORED,
-            },
+                match hit(x, y) {
+                    Some(i) => {
+                        let target = Route::NAV[i];
+                        // Clicking "Meus Decks" while inside a deck goes back to
+                        // the grid; clicking the link you are already on is a
+                        // no-op that still swallows the click.
+                        if target != self.route {
+                            self.navigate(target);
+                            return EventResult::clicked();
+                        }
+                        EventResult {
+                            handled: true,
+                            ..EventResult::IGNORED
+                        }
+                    }
+                    None => EventResult::IGNORED,
+                }
+            }
             _ => EventResult::IGNORED,
         }
     }
@@ -676,15 +763,20 @@ impl SpellbookView {
         animating |= self.toasts.tick(dt);
         animating |= self.overlay_mgr.tick(dt);
         {
-            let ctx = ScreenCtx {
+            let mut ctx = ScreenCtx {
                 tx: &self.tx,
                 actions: &mut self.actions,
             };
             animating |= self.data_panel.tick(dt, &ctx);
+            animating |= match self.route {
+                Route::Home => self.home.tick(dt, &mut ctx),
+                _ => false,
+            };
         }
         animating |= match self.route {
-            Route::Home => self.home.tick(dt),
-            Route::Decks | Route::Deck(_) => self.decks.tick(dt),
+            Route::Home => false, // handled above with ctx
+            Route::Decks => self.decks.tick(dt),
+            Route::Deck(_) => self.deck_detail.tick(dt),
             Route::Collection => self.collection.tick(dt),
             Route::Wishlist => self.wishlist.tick(dt),
             Route::Scanner => self.scanner.tick(dt),
@@ -697,7 +789,8 @@ impl SpellbookView {
     fn overlay_open(&self) -> bool {
         match self.route {
             Route::Home => self.home.overlay_open(),
-            Route::Decks | Route::Deck(_) => self.decks.overlay_open(),
+            Route::Decks => self.decks.overlay_open(),
+            Route::Deck(_) => self.deck_detail.overlay_open(),
             Route::Collection => self.collection.overlay_open(),
             Route::Wishlist => self.wishlist.overlay_open(),
             Route::Scanner => self.scanner.overlay_open(),
@@ -733,19 +826,21 @@ impl SpellbookView {
         // Scrolled screen content clips to the viewport below the header.
         // PushClip rects are logical; the encoder scales them to physical.
         c.push(SceneNode::PushClip {
-            x: SIDEBAR_W,
+            x: self.sidebar_width(),
             y: viewport.y,
-            w: self.width - SIDEBAR_W,
+            w: self.width - self.sidebar_width(),
             h: viewport.h,
         });
         match self.route {
             Route::Home => self
                 .home
                 .render(c, layers.content, content, &theme, &mut self.art),
-            Route::Decks | Route::Deck(_) => {
-                self.decks
-                    .render(c, layers.content, content, &theme, &mut self.art)
-            }
+            Route::Decks => self
+                .decks
+                .render(c, layers.content, content, &theme, &mut self.art),
+            Route::Deck(_) => self
+                .deck_detail
+                .render(c, layers.content, content, &theme, &mut self.art),
             Route::Collection => {
                 self.collection
                     .render(c, layers.content, content, &theme, &mut self.art)
@@ -771,10 +866,12 @@ impl SpellbookView {
                 self.home
                     .render_overlay(c, layers.overlay, window_rect, &theme, &mut self.art)
             }
-            Route::Decks | Route::Deck(_) => {
-                self.decks
-                    .render_overlay(c, layers.overlay, window_rect, &theme, &mut self.art)
-            }
+            Route::Decks => self
+                .decks
+                .render_overlay(c, layers.overlay, window_rect, &theme, &mut self.art),
+            Route::Deck(_) => self
+                .deck_detail
+                .render_overlay(c, layers.overlay, window_rect, &theme, &mut self.art),
             Route::Collection => self.collection.render_overlay(
                 c,
                 layers.overlay,
@@ -803,16 +900,20 @@ impl SpellbookView {
     fn render_sidebar(&mut self, c: &mut Compositor, theme: &Theme) {
         let glass = &theme.glass;
         let text_c = theme.colors.text;
+        let rail_w = self.sidebar_width();
+        let expanded = self.sidebar_expanded;
 
         // The rail: the raised opaque panel tone, one notch off the page.
         c.push(SceneNode::Rect {
             x: 0.0,
             y: 0.0,
-            w: SIDEBAR_W,
+            w: rail_w,
             h: self.height,
             color: theme.colors.surface.0,
         });
 
+        // Brand: the mark always; the wordmark only when expanded
+        // (style.css fades .nav-label at 64px).
         text(c, "Spellbook", 20.0, 600, 24.0, 26.0, text_c.0);
         text(
             c,
@@ -872,47 +973,87 @@ impl SpellbookView {
             {
                 c.push(node);
             }
-            text(
-                c,
-                route.title(),
-                14.0,
-                600,
-                rect.x + 44.0,
-                rect.y + (rect.h - 14.0 * 1.4) / 2.0,
-                fg,
-            );
+            // Collapsed 64px rail: the icons share a centre line; labels fade.
+            if expanded {
+                text(
+                    c,
+                    route.title(),
+                    14.0,
+                    600,
+                    rect.x + 44.0,
+                    rect.y + (rect.h - 14.0 * 1.4) / 2.0,
+                    fg,
+                );
+            }
         }
+
+        // Deck sub-list under "Meus Decks" (expanded + browsing decks only).
+        if self.sidebar_sublist_visible() {
+            for (i, (id, rect)) in self.sidebar_sublist_rects().into_iter().enumerate() {
+                let hovered = self.sidebar_sublist_hover == Some(i);
+                let active = matches!(self.route, Route::Deck(d) if d == id);
+                if hovered {
+                    c.push(rounded_rect(rect.x, rect.y, rect.w, rect.h, 8.0, glass.surface_hover.0));
+                }
+                if let Route::Deck(d) = self.route
+                    && d == id
+                {
+                    c.push(rounded_rect_stroke(rect.x, rect.y, rect.w, rect.h, 8.0, glass.edge_soft.0, 1.0));
+                }
+                if let Some(deck) = self.sidebar_decks.iter().find(|d| d.id == id) {
+                    let fg = if active {
+                        theme.colors.accent.0
+                    } else if hovered {
+                        theme.colors.text.0
+                    } else {
+                        theme.colors.text_dim.0
+                    };
+                    // Ellipsize like the CSS text-overflow.
+                    let max_chars = (rect.w / 7.0) as usize;
+                    let name: String = if deck.name.len() > max_chars {
+                        let cut: String = deck.name.chars().take(max_chars.saturating_sub(1)).collect();
+                        format!("{cut}…")
+                    } else {
+                        deck.name.clone()
+                    };
+                    text(c, &name, 12.5, 500, rect.x + 10.0, rect.y + 7.0, fg);
+                }
+            }
+        }
+
         c.push(SceneNode::PopClip);
 
         // Footer: the offline badge, then the data panel (info + updater)
-        // the JS sidebar carried across every page.
+        // the JS sidebar carried across every page. Both fade when the
+        // rail is collapsed (style.css hides #sidebar-data-panel).
         let foot_y = self.height - SIDEBAR_FOOTER_H + 10.0;
         if let Some(node) =
             icons::icon_at("circle", 8.0, theme.colors.success.0, 24.0, foot_y + 4.0)
         {
             c.push(node);
         }
-        text(
-            c,
-            "offline-first",
-            11.0,
-            500,
-            40.0,
-            foot_y,
-            glass.text_placeholder.0,
-        );
-        let panel = Rect::new(
-            0.0,
-            foot_y + 22.0,
-            SIDEBAR_W,
-            self.height - foot_y - 22.0,
-        );
-        self.data_panel
-            .render(c, panel, theme);
+        if expanded {
+            text(
+                c,
+                "offline-first",
+                11.0,
+                500,
+                40.0,
+                foot_y,
+                glass.text_placeholder.0,
+            );
+            let panel = Rect::new(
+                0.0,
+                foot_y + 22.0,
+                rail_w,
+                self.height - foot_y - 22.0,
+            );
+            self.data_panel.render(c, panel, theme);
+        }
     }
 
     fn render_header(&self, c: &mut Compositor, theme: &Theme) {
-        let x = SIDEBAR_W + PAD;
+        let x = self.sidebar_width() + PAD;
         text(
             c,
             self.route.title(),
@@ -1031,10 +1172,12 @@ mod tests {
     /// wide display empty.
     #[test]
     fn content_fills_any_window_width() {
+        // The rail is collapsed by default now (64px), so the width math the
+        // grid depends on starts from the collapsed rail.
         let narrow = test_view(1000.0, 800.0).content_rect();
         let wide = test_view(2560.0, 1400.0).content_rect();
-        assert!((narrow.w - (1000.0 - SIDEBAR_W - 80.0)).abs() < 0.5);
-        assert!((wide.w - (2560.0 - SIDEBAR_W - 80.0)).abs() < 0.5);
+        assert!((narrow.w - (1000.0 - SIDEBAR_COLLAPSED_W - 80.0)).abs() < 0.5);
+        assert!((wide.w - (2560.0 - SIDEBAR_COLLAPSED_W - 80.0)).abs() < 0.5);
         assert!(wide.w > narrow.w * 2.0);
     }
 

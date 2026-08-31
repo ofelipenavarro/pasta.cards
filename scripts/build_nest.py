@@ -72,6 +72,32 @@ class NestBuildConfig:
 
 
 def compute_model_hash(model_name):
+    """Fingerprint the actual model files (nest's model_hash convention),
+    so the search-time embedder gate can verify the corpus. Falls back to
+    hashing the name only if the local snapshot cannot be resolved — such a
+    corpus will be REJECTED by `nest search-text` / nestui."""
+    fp_dir = str(Path(__file__).resolve().parent.parent / "crates" / "nest" / "python")
+    if fp_dir not in sys.path:
+        sys.path.insert(0, fp_dir)
+    try:
+        from model_fingerprint import (
+            compute_model_fingerprint,
+            fingerprint_to_model_hash,
+            hf_cache_snapshot,
+        )
+
+        snap = hf_cache_snapshot(model_name)
+        if snap is None and "/" not in model_name:
+            # bare names resolve from the sentence-transformers org
+            snap = hf_cache_snapshot(f"sentence-transformers/{model_name}")
+        if snap is not None:
+            fp = compute_model_fingerprint(str(snap), model_id=model_name)
+            return fingerprint_to_model_hash(fp)
+        print(f"Warning: no local snapshot for {model_name}; "
+              "falling back to a NAME hash — search gates will reject this corpus")
+    except Exception as e:
+        print(f"Warning: model fingerprint failed for {model_name} ({e}); "
+              "falling back to a NAME hash — search gates will reject this corpus")
     return "sha256:" + hashlib.sha256(model_name.encode()).hexdigest()
 
 

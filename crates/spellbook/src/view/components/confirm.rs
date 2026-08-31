@@ -79,3 +79,48 @@ impl Confirm {
         self.modal.render(c, layer, theme, window.w, window.h);
     }
 }
+
+use engine::compositor::SceneNode;
+use engine::ui::widgets::glass_pill;
+use super::super::text;
+
+/// The two-button confirm dialog, matching `confirm.js` treatment.
+pub fn render_confirm_dialog(
+    c: &mut Compositor,
+    layer: LayerId,
+    window: Rect,
+    theme: &Theme,
+    title: &str,
+    message: &str,
+    buttons: (&str, bool),
+) {
+    let _ = buttons;
+    // Dim backdrop.
+    c.push(SceneNode::Rect {
+        x: window.x, y: window.y, w: window.w, h: window.h,
+        color: [0.0, 0.0, 0.0, 0.42],
+    });
+    let pw = 380.0f32.min(window.w - 32.0);
+    let ph = 190.0f32.min(window.h - 32.0);
+    let panel_rect = R::new(
+        window.x + (window.w - pw) / 2.0,
+        window.y + (window.h - ph) / 2.0,
+        pw,
+        ph,
+    );
+    for node in glass_pill(panel_rect, theme.radius.lg, theme.glass.edge.0, 1.5, theme.glass.popover.0) {
+        c.push(node);
+    }
+    text(c, title, 15.0, 600, panel_rect.x + 20.0, panel_rect.y + 18.0, theme.colors.text.0);
+    text(c, message, 12.0, 400, panel_rect.x + 20.0, panel_rect.y + 48.0, theme.colors.text_dim.0);
+
+    let (confirm_label, danger) = buttons;
+    let cx = window.x + window.w / 2.0;
+    let by = window.y + window.h / 2.0 + 40.0;
+    let yes = Rect::new(cx - 230.0, by, 140.0, 42.0);
+    let no = Rect::new(cx + 90.0, by, 120.0, 42.0);
+    c.push(rounded_rect(yes.x, yes.y, yes.w, yes.h, theme.radius.md, if danger { theme.colors.danger.0 } else { theme.colors.accent.0 }));
+    text(c, confirm_label, 12.0, 600, yes.x + 20.0, yes.y + 14.0, [0.9, 0.9, 0.9, 1.0]);
+    c.push(rounded_rect(no.x, no.y, no.w, no.h, theme.radius.md, theme.glass.surface_active.0));
+    text(c, "Cancelar", 12.0, 500, no.x + 18.0, no.y + 14.0, theme.colors.text.0);
+}

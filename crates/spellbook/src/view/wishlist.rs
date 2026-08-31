@@ -24,6 +24,7 @@ use crate::art::ArtCache;
 use crate::view::components::add_card::{AddCardAnswer, AddCardModal};
 use crate::view::components::card_modal::{CardModal, CardModalAnswer};
 use crate::view::components::filters::{FilterBar, matches_filters};
+use crate::view::components::confirm::render_confirm_dialog;
 use crate::view::components::search_field::SearchField;
 
 const SEARCH_H: f32 = 52.0; // LabeledField::height()
@@ -51,6 +52,8 @@ enum Hit {
 }
 
 pub struct WishlistScreen {
+    /// (card name, entry id) pending the "tirar da wishlist?" confirm.
+    drop_confirm: Option<(String, i64)>,
     wishes: Vec<WishlistGroup>,
     search: String,
     search_field: SearchField,
@@ -87,6 +90,7 @@ impl WishlistScreen {
             SearchField::new_without_callback("Buscar carta (PT ou EN)…", theme);
         search_field.focus();
         Self {
+            drop_confirm: None,
             wishes: Vec::new(),
             search: String::new(),
             search_field,
@@ -224,6 +228,9 @@ impl WishlistScreen {
     }
 
     pub fn handle_escape(&mut self) -> bool {
+        if self.drop_confirm.take().is_some() {
+            return true;
+        }
         if self.add_card_open {
             if self.add_card_modal.handle_escape() {
                 return true;
@@ -270,7 +277,10 @@ impl WishlistScreen {
     }
 
     pub fn overlay_open(&self) -> bool {
-        self.add_card_open || self.card_modal.is_some() || self.filter_bar.is_open()
+        self.add_card_open
+            || self.card_modal.is_some()
+            || self.filter_bar.is_open()
+            || self.drop_confirm.is_some()
     }
 
     pub fn handle_overlay_event(
@@ -303,6 +313,27 @@ impl WishlistScreen {
             }
             return result;
         }
+        // The drop-confirm dialog owns the window while open.
+        if let Some((name, id)) = self.drop_confirm.clone() {
+            if let WidgetEvent::MouseDown { x, y } = *event {
+                let (yes, no) = crate::view::deck_detail::pub_confirm_buttons(window);
+                if yes.contains(x, y) {
+                    self.drop_confirm = None;
+                    if !self.wishlist_busy()
+                        && let Some(tx) = &self.tx
+                    {
+                        self.removing = Some(self.wishes.iter().position(|g| g.card_name == name).unwrap_or(gi_index_of(&self.wishes, id)));
+                        let _ = tx.send(Command::DeleteWishlist { entry_id: id });
+                    }
+                    return EventResult::clicked();
+                }
+                if no.contains(x, y) || !window.contains(x, y) {
+                    self.drop_confirm = None;
+                    return EventResult::changed();
+                }
+            }
+            return EventResult::IGNORED;
+        }
         // Open filter menu floats over the grid and eats the event first.
         let toggle = self.filter_toggle_rect(self.last_content);
         self.filter_bar.handle_event(event, toggle, window)
@@ -320,6 +351,15 @@ impl WishlistScreen {
             self.add_card_modal.render(c, layer, window, theme);
         } else if let Some(modal) = &mut self.card_modal {
             modal.render(c, layer, window, theme, art);
+        } else if let Some((name, _)) = self.drop_confirm.clone() {
+            crate::view::components::confirm::render_confirm_dialog(
+                c,
+                layer,
+                window,
+                theme,
+                "Tirar da wishlist?",
+                &format!("{name} sai da sua lista de compras."),
+            );
         } else {
             // The open filter menu floats over content, outside the scroll clip.
             let toggle = self.filter_toggle_rect(self.last_content);
@@ -473,15 +513,13 @@ impl WishlistScreen {
                         EventResult::clicked()
                     }
                     Some(Hit::Remove(i)) => {
-                        if let Some(&gi) = self.visible.get(i)
+                        // confirm.js: "Tirar da wishlist?" antes de remover.
+                        if !self.wishlist_busy()
+                            && let Some(&gi) = self.visible.get(i)
                             && let Some(group) = self.wishes.get(gi)
                             && let Some(entry) = group.entries.first()
-                            && !self.wishlist_busy()
                         {
-                            self.removing = Some(gi);
-                            ctx.send(Command::DeleteWishlist {
-                                entry_id: entry.id,
-                            });
+                            self.drop_confirm = Some((group.card_name.clone(), entry.id));
                         }
                         EventResult::clicked()
                     }
@@ -932,4 +970,11 @@ mod tests {
         assert!(screen.card_modal.is_some());
         assert_eq!(screen.modal_group, Some(0));
     }
+}
+/// The wishlist index that holds the entry with the given id (fallback 0).
+fn gi_index_of(wishes: &[WishlistGroup], entry_id: i64) -> usize {
+    wishes
+        .iter()
+        .position(|g| g.entries.iter().any(|e| e.id == entry_id))
+        .unwrap_or(0)
 }

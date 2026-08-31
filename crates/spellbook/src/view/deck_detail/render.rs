@@ -18,7 +18,7 @@ use super::layout::{HeaderRects, LayoutHit, StatsRects};
 use super::super::{EditKey, ScreenCtx, text as core_text};
 use super::{GroupBy, SortMode, ViewMode, curve_color, ROW_H};
 use super::{CHIP_H, STAT_PANEL_H};
-use super::events::ownership_tag;
+use super::events::{confirm_buttons, ownership_tag};
 use crate::art::ArtCache;
 
 impl DeckDetailScreen {
@@ -707,4 +707,46 @@ impl DeckDetailScreen {
             let _ = ctx;
         }
 }
+}
+
+impl DeckDetailScreen {
+    /// Floating chrome over the page: modal windows (edit/import/delete),
+    /// the two confirm dialogs, the open filter menu and the export list.
+    pub fn render_overlay(
+        &mut self,
+        c: &mut Compositor,
+        layer: LayerId,
+        window: Rect,
+        theme: &Theme,
+        art: &mut ArtCache,
+    ) {
+        let _ = art;
+        // Filter menu float.
+        if self.filter_bar.is_open() && !self.edit_deck_modal.is_open() && !self.import_deck_modal.is_open() && !self.delete_deck_modal.is_open() {
+            let content = window;
+            let t = self.toolbar_rects(content);
+            self.filter_bar.render(c, t.filter, layer, theme);
+        }
+        // Modals.
+        if self.edit_deck_modal.is_open() {
+            self.edit_deck_modal.render(c, layer, window, theme);
+        } else if self.import_deck_modal.is_open() {
+            self.import_deck_modal.render(c, layer, window, theme);
+        } else if self.delete_deck_modal.is_open() {
+            self.delete_deck_modal.render(c, layer, window, theme);
+        }
+
+        // Confirm dialogs, over everything.
+        if let Some((name, _)) = self.remove_confirm.clone() {
+            render_confirm_dialog(c, layer, window, theme,
+                "Remover do deck?",
+                &format!("{name} sai do deck e a cópia volta para as cartas livres da coleção."),
+                ("Remover", true));
+        } else if let Some((name, _)) = self.add_confirm.clone() {
+            render_confirm_dialog(c, layer, window, theme,
+                "Adicionar outra cópia?",
+                &format!("{name} já está neste deck. Adicionar mais uma?"),
+                ("Adicionar", false));
+        }
+    }
 }
